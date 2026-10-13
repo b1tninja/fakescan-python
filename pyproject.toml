@@ -1,0 +1,47 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "fakescan"
+version = "0.1.0"
+description = "Python bindings for fakescan: an in-process fake WSD scanner plus its control-plane client"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT OR Apache-2.0"
+keywords = ["scanner", "wsd", "wia", "testing", "fakescan"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pillow>=10", "maturin>=1.7,<2"]
+pdfcraft = ["pdfcraft"]
+# MCP attach-only server: pip install -e ".[mcp]"
+mcp = ["mcp>=1.0"]
+
+[project.scripts]
+fakescan-lab = "fakescan.lab:main"
+fakescan-ctl = "fakescan.ctl:main"
+fakescan-mcp = "fakescan.mcp_server:main"
+fakescan-refs = "fakescan.wsd_docs:main"
+
+[project.urls]
+Homepage = "https://github.com/b1tninja/fakescan-python"
+Repository = "https://github.com/b1tninja/fakescan-python"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "fakescan._native"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "live: needs a running fakescan on FAKESCAN_BASE_URL (default http://127.0.0.1:3920)",
+  "local: starts fakescan itself and walks the scan matrix (no Imaging install)",
+  "embedded: runs the fakescan server in-process through the native binding",
+]

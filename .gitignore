@@ -1,0 +1,36 @@
+/target/
+/dist/
+*.egg-info/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyd
+*.so
+*.dll
+*.pdb
+
+# Mangled or extra cargo target directories (an unquoted Windows path once created one)
+/*target*/
+*.pyd.*
+python/**/_native*.old*
+
+# Secrets, logs, local state, editor and OS cruft
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.log
+devices.json
+*.tmp
+*.orig
+*.rej
+*.bak
+*.swp
+*~
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.cursor/
+.claude/

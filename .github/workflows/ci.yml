@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: fakescan-python
+      - uses: actions/checkout@v4
+        with:
+          repository: b1tninja/fakescan
+          path: fakescan
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        working-directory: fakescan-python
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install maturin pytest pillow httpx
+          maturin develop
+      - name: Test (embedded + local matrix)
+        working-directory: fakescan-python
+        run: |
+          . .venv/bin/activate
+          pytest -m "not live" -q
+
+  python-lab:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: fakescan-python
+      - uses: actions/checkout@v4
+        with:
+          repository: b1tninja/fakescan
+          path: fakescan
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        working-directory: fakescan-python
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install maturin pytest pillow httpx
+          maturin develop
+      - name: Build and start the fakescan image
+        working-directory: fakescan
+        run: |
+          docker compose build
+          docker compose up -d --wait
+      - name: Live tests
+        working-directory: fakescan-python
+        env:
+          FAKESCAN_BASE_URL: http://127.0.0.1:3920
+        run: |
+          . .venv/bin/activate
+          pytest -m live -q
+      - name: Stop
+        if: always()
+        working-directory: fakescan
+        run: docker compose down

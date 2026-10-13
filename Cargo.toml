@@ -1,0 +1,19 @@
+[package]
+name = "fakescan-python"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Python bindings for fakescan: run the fake WSD scanner in-process"
+repository = "https://github.com/b1tninja/fakescan-python"
+rust-version = "1.94"
+
+[lib]
+name = "fakescan_python"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["abi3-py310"] }
+fakescan = { path = "../fakescan/crates/fakescan" }
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "net", "time"] }
+uuid = { version = "1", features = ["v4"] }

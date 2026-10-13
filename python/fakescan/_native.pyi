@@ -1,0 +1,30 @@
+__version__: str
+
+class Server:
+    def __init__(
+        self,
+        *,
+        profiles: str,
+        profile: str = "brother-wsd",
+        host: str = "127.0.0.1",
+        port: int = 0,
+        device_uuid: str | None = None,
+        wsd: bool = True,
+        discovery: bool = False,
+        advertise: str | None = None,
+        devices: list[tuple[str, str, str | None, str | None]] | None = None,
+    ) -> None: ...
+    @property
+    def port(self) -> int: ...
+    @property
+    def base_url(self) -> str: ...
+    @property
+    def device_uuid(self) -> str: ...
+    @property
+    def devices(self) -> list[tuple[str, str, str, str]]:
+        """(id, uuid, profile, friendly_name) of the devices present at start-up."""
+    @property
+    def running(self) -> bool: ...
+    def stop(self) -> None: ...
+    def __enter__(self) -> Server: ...
+    def __exit__(self, *args: object) -> bool: ...
