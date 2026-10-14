@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import uuid as _uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from . import _paths
 from ._native import Server as _NativeServer
+from ._uuids import random_fake_uuid
 from .client import Client
 from .manager import Manager
 
@@ -91,7 +91,7 @@ class Server:
         specs = None
         if devices:
             specs = [
-                (d.id, d.profile, d.device_uuid or str(_uuid.uuid4()), d.friendly_name) for d in devices
+                (d.id, d.profile, d.device_uuid or random_fake_uuid(), d.friendly_name) for d in devices
             ]
         self._native = _NativeServer(
             profiles=str(profiles if profiles is not None else _paths.profiles_dir()),

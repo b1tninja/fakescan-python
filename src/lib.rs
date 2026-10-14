@@ -56,7 +56,7 @@ impl Server {
             for (id, prof, uuid, name) in list {
                 let uuid = match uuid {
                     Some(t) => Uuid::parse_str(&t).map_err(|e| PyRuntimeError::new_err(format!("device {id}: uuid: {e}")))?,
-                    None => Uuid::new_v4(),
+                    None => fakescan::lab::random_fake_uuid(),
                 };
                 let mut d = DeviceConfig::new(id, prof, uuid);
                 d.friendly_name = name;

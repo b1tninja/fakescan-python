@@ -24,10 +24,13 @@ from .soap import (
     acquire_pages,
     get_scanner_status,
 )
+from ._uuids import FAKE_UUID_PREFIX, is_fake_uuid
 from .wsd_docs import generate_reference_docs
 from .wsd_schema import body_problems, load_schema, parse_schema
 
 __all__ = [
+    "FAKE_UUID_PREFIX",
+    "is_fake_uuid",
     "after_ms",
     "after_pages",
     "mid_page",

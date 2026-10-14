@@ -102,7 +102,7 @@ m.registry(); m.wait_installed("tray5", timeout=60)
 
 Errors are `fakescan.ApiError` (400 bad profile / port without the UUID, 404 unknown device, 409 duplicate).
 A WIA scanner is matched to a device **only** by the UUID in its `port` string (exactly one distinct UUID,
-case/brace/`urn:uuid:` tolerant); names are never used. Anything else is `foreign` and is never touched
+case/brace/`urn:uuid:` tolerant); names are never used. Fake devices are recognised by the UUID prefix `fakescan.FAKE_UUID_PREFIX` (`00000000-0000-4000-8000-`; `fakescan.is_fake_uuid(value)`, case/brace/`urn:uuid:` tolerant): the server (`POST /v1/devices` and `Device(device_uuid=...)`) refuses a UUID outside it with a 400, and a device without an explicit UUID gets a random one inside it. Anything else is `foreign` and is never touched
 (`fakescan.match_wia_to_devices(devices, wia_scanners)` is the pure version of that rule; rows with
 several UUIDs are withheld from the daemon by `Manager.reconcile` and returned as foreign).
 `reconcile_from_windows` never modifies anything on Windows and accepts an injected `list_scanners=` callable.
