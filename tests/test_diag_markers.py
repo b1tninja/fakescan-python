@@ -517,3 +517,13 @@ def test_scan_dpi_sets_the_plausible_scale_of_the_fit():
     # an implausible scale relative to scan_dpi is still refused
     bad = diag.analyze_diag_page(img, lay400, scan_dpi=400, detector="python")
     assert bad["summary"]["fit"] == "failed" and "implausible" in bad["summary"]["reason"]
+
+
+def test_a_small_custom_sheet_with_undrawn_markers_still_reports_an_orientation():
+    """The 123 x 456 mm sheet drops the edge markers (``drawn: false``, empty ``expected``): the orientation vote must skip them."""
+    layout = diag.diag_page_layout(100, paper="123x456")
+    img = diag.render_diag_page(100, 0, paper="123x456")
+    undrawn = [e for e in layout["elements"] if e.get("kind") == "marker" and not e.get("drawn", True)]
+    assert undrawn
+    rep = diag.analyze_diag_page(img, layout, scan_dpi=100)
+    assert rep["markers"]["orientation"]["verdict"] in ("upright", "unknown")

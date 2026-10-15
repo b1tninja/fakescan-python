@@ -575,9 +575,12 @@ def _orientation_from_markers(det: dict[str, Any], layout: dict[str, Any]) -> di
     centre = {}
     by_mid = {}
     for e in els.values():
+        mid = (e.get("expected") or {}).get("marker_id")
+        if not e.get("drawn", True) or mid is None:
+            continue
         r = e["rect_mm"]
         centre[e["id"]] = ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0)
-        by_mid[e["expected"]["marker_id"]] = e["id"]
+        by_mid[mid] = e["id"]
     w, h = layout["raster_mm"]
     tol = 0.1 * max(w, h) / 10.0 + 1.0
     pattern = {n: 0 for n in ORIENTATIONS}
