@@ -61,7 +61,7 @@ def diag_page_layout(dpi: int = 100, version: int = PAGE_LAYOUT_VERSION, **param
     Version 3 (default) is the parametric generator: ``paper`` (``"A4"``, ``"LETTER"``, ``"A3"``, ``"JIS-B5"``,
     ``"210x297"``, ...), ``orientation``, ``width_mm`` / ``height_mm`` (custom), ``width_px`` / ``height_px`` (exact
     raster), ``margin_mm``, ``bleed_mm``, ``page``, ``copy``, ``total``, ``side`` (``front`` / ``back``), ``job``,
-    ``colour`` (``rgb`` / ``gray``), ``banner_px``.  Versions 1 and 2 are the fixed-size layouts (``dpi`` is the
+    ``colour`` (``rgb`` / ``gray``), ``rulers`` (``metric`` / ``inch`` / ``both``, default ``both``), ``banner_px``.  Versions 1 and 2 are the fixed-size layouts (``dpi`` is the
     requested dpi; the page renders at the effective dpi).
     """
     from . import _native
@@ -91,7 +91,8 @@ def diag_page_primitives(layout: dict[str, Any]) -> list[dict[str, Any]]:
 
     ``op`` is one of rect, polygon, line, circle, text, grating, ticks (``vector: true``: draw them with any
     vector backend) or ramp, hue_wheel, siemens_star, zone_plate, halftone, qr (``vector: false``: raster-only, crop
-    the element rectangle from :func:`render_diag_page`, or draw the QR yourself from ``payload``).
+    the element rectangle from :func:`render_diag_page`, or draw the QR yourself from ``payload``).  The ArUco markers,
+    boards, brackets and vertical ruler ticks (layout revision 1) are plain ``rect`` / ``circle`` ops: no new op needed.
     """
     return list(layout.get("primitives", []))
 
@@ -101,7 +102,19 @@ def diag_spec_from_qr(payload: str) -> dict[str, Any] | None:
     from . import _native
 
     r = _native.diag_spec_from_qr(payload)
-    return json.loads(r) if r else None
+    if not r:
+        return None
+    spec = json.loads(r)
+    # layout revision inside layout 3 (the payload key ``rev``; payloads without it are revision 0)
+    rev = 0
+    for part in payload.split("|"):
+        if part.startswith("rev="):
+            try:
+                rev = int(part[4:])
+            except ValueError:
+                rev = 0
+    spec["layout_revision"] = rev
+    return spec
 
 
 def diag_paper_sizes() -> dict[str, tuple[float, float]]:
@@ -1097,20 +1110,25 @@ def _analyze_line_grid(ras: _Raster, A: _Affine, el: dict[str, Any], nominal: fl
 # Driver
 # --------------------------------------------------------------------------------------------------
 def analyze_diag_page(image, layout: dict[str, Any] | None = None, dpi: int | None = None, scan_dpi: float | None = None,
-                      init: tuple[float, float, float, float, float, float] | None = None) -> dict[str, Any]:
+                      init: tuple[float, float, float, float, float, float] | None = None, detector: str = "auto",
+                      marker_fallback: bool = True) -> dict[str, Any]:
     """Per-element report for a scanned / printed-back ``diag`` page (layout v3: ``fakescan.diag3``; v2 below).
 
     ``image``: PIL image of the page (any size).  ``layout``: from :func:`diag_page_layout` (default: built for
     ``dpi``, default 100).  ``scan_dpi``: the resolution the raster is *supposed* to have (default: the layout's
     effective dpi); every ``*_vs_nominal`` figure and mm error is relative to it.  ``init``: optional initial
     affine ``(a, b, c, d, e, f)`` (px = a*x + b*y + c, ...) for pages that are shifted or scaled a lot; the default
-    assumes the raster shows the whole sheet.
+    assumes the raster shows the whole sheet.  ``detector`` (layout v3): ``"auto"`` uses ``cv2.aruco`` for the ArUco
+    markers when ``opencv-contrib`` is importable and the pure-Python detector otherwise; ``"python"`` / ``"cv2"`` force one.
+    The page fit uses the registration crosses; fewer than three real crosses (weak ones are rejected as clutter) fall
+    back to the marker corners (``summary.fit == "markers"``) unless ``marker_fallback`` is false, and otherwise the
+    report says ``fit: failed``.
     """
     lay = layout or diag_page_layout(dpi or 100)
     if lay["layout_version"] >= 3:
         from .diag3 import analyze_v3
 
-        return analyze_v3(image, lay, scan_dpi=scan_dpi, init=init)
+        return analyze_v3(image, lay, scan_dpi=scan_dpi, init=init, detector=detector, marker_fallback=marker_fallback)
     ras = _Raster(image)
     if lay["layout_version"] < 2:
         raise ValueError("analyze_diag_page needs a layout-v2 layout")

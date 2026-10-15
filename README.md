@@ -194,5 +194,19 @@ vector = diag.diag_page_primitives(layout)            # mm primitives for a vect
 layout_v2 = diag.diag_page_layout(100, version=2)     # the fixed-size layout (blind pattern analyzer)
 ```
 
+Layout 3 revision 1 adds dual-unit rulers (`rulers="metric" | "inch" | "both"`), OpenCV-compatible ArUco `DICT_4X4_50`
+markers, a chessboard, a ChArUco board, an asymmetric circle grid and corner L-brackets. The analyzer decodes and locates the
+markers to sub-pixel without OpenCV (pure Python + Pillow) and uses `cv2.aruco`, `findChessboardCorners`, ChArUco
+interpolation and `findCirclesGrid` when `opencv-contrib` is importable (optional; `detector="auto" | "python" | "cv2"`):
+
+```python
+from fakescan import diag
+lay = diag.diag_page_layout(300, paper="A4", rulers="both")
+rep = diag.analyze_diag_page(scan, lay)               # scan = PIL image of the page
+rep["markers"]["rms_corner_err_mm"], rep["markers"]["homography"]["residual_rms_mm"]
+rep["rulers"]["x"]["mm"]["dpi"], rep["rulers"]["y"]["in"]["length_error_mm"]   # dpi per axis per unit, error over the baseline
+rep["summary"]["fit"]                                  # "crosses", "markers" or "failed" (never a fit to clutter)
+```
+
 Layout and report format: `docs/diag-page-v3.md` (default, parametric) and `docs/diag-page-v2.md` in the fakescan repo. Needs the native module built with
 `maturin develop`.
