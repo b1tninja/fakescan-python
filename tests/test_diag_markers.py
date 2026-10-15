@@ -225,7 +225,9 @@ def test_rot180_is_reported():
     lay, img = pages("A4", 100, {})
     rep = diag.analyze_diag_page(img.rotate(180), lay, detector="python")
     assert rep["summary"]["orientation"] == "rot180"
-    assert rep["summary"]["marker_orientation"] in ("rot180", "unknown")
+    # every marker decodes as another id (the opposite position's) and the page is still named from them
+    assert rep["summary"]["marker_orientation"] == "rot180"
+    assert rep["markers"]["orientation"]["votes"] >= 6
 
 
 # ------------------------------------------------------------------------------------------------ rulers
@@ -397,3 +399,118 @@ def test_boards_without_cv2_report_circles_and_say_what_is_missing():
     assert rep["elements"]["circle_grid"]["centroids"] == 30
     assert rep["elements"]["circle_grid"]["max_err_mm"] < 0.1
     assert rep["elements"]["chessboard"]["cv2"] == "unavailable"
+
+
+# ------------------------------------------------------------------------------------------------ analyzer accuracy (rev. 1 fixes)
+def _touches_media_outline(lay, r, tol=1.5):
+    """A dashed media-outline line (drawn on the sheet, e.g. the Statement outline on Letter) running along the marker."""
+    for o in lay["elements"]:
+        if o["kind"] != "media_outline":
+            continue
+        a = o["rect_mm"]
+        if any(r[0] - tol <= x <= r[2] + tol and a[1] <= r[3] and a[3] >= r[1] for x in (a[0], a[2])):
+            return True
+        if any(r[1] - tol <= y <= r[3] + tol and a[0] <= r[2] and a[2] >= r[0] for y in (a[1], a[3])):
+            return True
+    return False
+
+
+@pytest.mark.parametrize("dpi", [100, 150, 200, 300, 600])
+@pytest.mark.parametrize("paper", ["A4", "LETTER", "A5"])
+def test_clean_render_markers_all_found_and_worst_corner_under_a_third_of_a_pixel(paper, dpi):
+    lay, img = pages(paper, dpi, {})
+    k = lay["px_per_mm"]
+    A = diag._Affine(k, 0.0, 0.0, 0.0, k, 0.0)  # the raster is exactly the sheet at k px/mm
+    det = dm.detect_markers(img, diag._Raster(img), A, lay, detector="python")
+    assert det["n_found"] == det["n_expected"], [i for i, r in det["markers"].items() if "corners_px" not in r]
+    worst = 0.0
+    for e in markers_of(lay):
+        r = det["markers"][e["id"]]
+        assert r["decoded_id"] == r["marker_id"] and r["rotation_deg"] == 0 and not r["mirrored"], e["id"]
+        if _touches_media_outline(lay, e["rect_mm"]):
+            continue  # real ink on the marker's edge (the generator draws the outlines of other papers over the sheet)
+        worst = max(worst, max(math.dist(A(*c), q) for c, q in zip(e["expected"]["corners_mm"], r["corners_px"])))
+    assert worst < 0.3, worst
+
+
+def test_marker_mr_edge_fit_works_at_600_dpi():
+    lay, img = pages("A4", 600, {})
+    k = lay["px_per_mm"]
+    det = dm.detect_markers(img, diag._Raster(img), diag._Affine(k, 0.0, 0.0, 0.0, k, 0.0), lay, detector="python")
+    r = det["markers"]["marker_mr"]
+    assert r["found"] and "corners_px" in r and "reason" not in r
+    assert det["n_found"] == det["n_expected"] == 20
+
+
+def test_marker_edges_survive_resampling_and_sub_pixel_offsets():
+    # a 600 dpi render reduced to 150 dpi (area / cubic filters) and shifted by a fraction of a pixel
+    lay, big = pages("A4", 600, {})
+    k = 150 / 25.4
+    for flt in (Image.BOX, Image.BICUBIC):
+        img = big.resize((big.width // 4, big.height // 4), flt)
+        img = img.transform(img.size, Image.AFFINE, (1, 0, -0.37, 0, 1, 0.21), resample=Image.BICUBIC, fillcolor=(255, 255, 255))
+        A = diag._Affine(k, 0.0, 0.37, 0.0, k, -0.21)
+        det = dm.detect_markers(img, diag._Raster(img), A, lay, detector="python")
+        assert det["n_found"] == det["n_expected"]
+        worst = max(max(math.dist(A(*c), q) for c, q in zip(e["expected"]["corners_mm"], det["markers"][e["id"]]["corners_px"]))
+                    for e in markers_of(lay) if not _touches_media_outline(lay, e["rect_mm"]))
+        assert worst < 0.5, (flt, worst)
+
+
+def test_a_neighbouring_feature_in_one_profile_does_not_tilt_the_side():
+    # robust line fit: one bad edge point among seven is dropped
+    pts = [(float(i), 0.1 * i) for i in range(7)]
+    pts[2] = (2.0, 3.0)
+    m, q, _ = dm._fit_line(pts, by_x=True, tol=0.4)
+    assert abs(m - 0.1) < 1e-9 and abs(q) < 1e-9
+
+
+ALL_STATES = ["upright", "rot90", "rot180", "rot270", "flip_h", "flip_v", "transpose", "anti_transpose"]
+# PIL transform that turns the upright page into a received page in each state
+_MAKE = {"upright": None, "rot90": "ROTATE_270", "rot180": "ROTATE_180", "rot270": "ROTATE_90", "flip_h": "FLIP_LEFT_RIGHT",
+         "flip_v": "FLIP_TOP_BOTTOM", "transpose": "TRANSPOSE", "anti_transpose": "TRANSVERSE"}
+
+
+@pytest.mark.parametrize("state", ALL_STATES)
+def test_detect_orientation_names_all_eight_states(state):
+    lay, img = pages("A4", 100, {})
+    rec = img if _MAKE[state] is None else img.transpose(getattr(Image.Transpose, _MAKE[state]))
+    o = dm.detect_orientation(rec, lay)
+    assert o["available"] and o["verdict"] == state and not o["ambiguous"], o
+    assert o["found"] >= 6
+    # the reported fix restores the upright page
+    fixed = rec if o["fix"] is None else rec.transpose(getattr(Image.Transpose, o["fix"]))
+    assert fixed.size == img.size
+
+
+@pytest.mark.parametrize("state", ["rot180", "flip_h", "flip_v"])
+def test_markers_orientation_in_the_report_names_axis_preserving_states(state):
+    lay, img = pages("A4", 150, {})
+    rep = diag.analyze_diag_page(img.transpose(getattr(Image.Transpose, _MAKE[state])), lay, detector="python")
+    assert rep["markers"]["orientation"]["verdict"] == state
+    assert rep["summary"]["marker_orientation"] == state
+    assert rep["markers"]["orientation"]["fix"] is not None
+
+
+@pytest.mark.parametrize("state", ["rot90", "rot270", "transpose", "anti_transpose"])
+def test_axis_swapping_states_fail_the_fit_but_are_still_named(state):
+    lay, img = pages("A4", 100, {})
+    rep = diag.analyze_diag_page(img.transpose(getattr(Image.Transpose, _MAKE[state])), lay, detector="python")
+    assert rep["summary"]["fit"] == "failed"
+    assert rep["summary"]["marker_orientation"] == state
+
+
+def test_scan_dpi_sets_the_plausible_scale_of_the_fit():
+    # a layout generated at 400 dpi (the PDF adapter's) analysed on a 150 dpi raster
+    lay400 = diag.diag_page_layout(400, paper="A4")
+    img = diag.render_diag_page(150, paper="A4")
+    refused = diag.analyze_diag_page(img, lay400, detector="python")
+    assert refused["summary"]["fit"] == "failed" and "implausible" in refused["summary"]["reason"]
+    rep = diag.analyze_diag_page(img, lay400, scan_dpi=150, detector="python")
+    assert rep["summary"]["fit"] == "crosses"
+    assert abs(rep["summary"]["scale_x_vs_nominal"] - 1.0) < 0.003
+    assert rep["markers"]["n_found"] == rep["markers"]["n_expected"]
+    assert rep["markers"]["rms_corner_err_mm"] < 0.1
+    # an implausible scale relative to scan_dpi is still refused
+    bad = diag.analyze_diag_page(img, lay400, scan_dpi=400, detector="python")
+    assert bad["summary"]["fit"] == "failed" and "implausible" in bad["summary"]["reason"]

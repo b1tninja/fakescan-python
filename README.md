@@ -208,5 +208,11 @@ rep["rulers"]["x"]["mm"]["dpi"], rep["rulers"]["y"]["in"]["length_error_mm"]   #
 rep["summary"]["fit"]                                  # "crosses", "markers" or "failed" (never a fit to clutter)
 ```
 
+`scan_dpi=` is the resolution the raster is supposed to have (a layout generated at 400 dpi analysed on a 150 dpi raster needs
+`scan_dpi=150`; the fit's plausibility test is relative to it). `rep["markers"]["orientation"]["verdict"]` names the page's
+dihedral state (`upright`, `rot90`, `rot180`, `rot270`, `flip_h`, `flip_v`, `transpose`, `anti_transpose`), also when every
+marker decodes as another id (a page rotated 180 degrees); `diag_markers.detect_orientation(image, layout)` names all eight
+without a page fit. The pure-Python marker corners are within 0.3 px of the truth on clean renders at 100-600 dpi.
+
 Layout and report format: `docs/diag-page-v3.md` (default, parametric) and `docs/diag-page-v2.md` in the fakescan repo. Needs the native module built with
 `maturin develop`.

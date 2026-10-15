@@ -30,6 +30,9 @@ __all__ = [
     "detect_markers",
     "fit_homography",
     "analyze_boards",
+    "detect_orientation",
+    "ORIENTATIONS",
+    "ORIENTATION_FIX",
 ]
 
 ARUCO_DICT = "DICT_4X4_50"
@@ -165,24 +168,23 @@ def _ring_score(ras, A, x0: float, y0: float, c: float) -> float:
 
 
 def _locate(ras, A, rect, search: float):
-    """Best offset (mm) of the marker at ``rect`` within ``search`` mm, by the ring contrast."""
+    """Best offset (mm) of the marker at ``rect`` within ``search`` mm, by the ring contrast.
+
+    The ring score is flat while every module-centre sample stays inside its module (about +/- half a module), so the
+    answer is the centroid of the near-maximal plateau rather than its first cell (which sat at the edge of the
+    plateau and was up to half a module off).  ``_refine_corners`` then tightens the position to the edge fit.
+    """
     c = (rect[2] - rect[0]) / 6.0
-    best, bs = (0.0, 0.0), -1e9
     step = max(0.25, min(0.6, c * 0.5))
     n = int(search / step)
+    grid = {}
     for iy in range(-n, n + 1):
         for ix in range(-n, n + 1):
-            s = _ring_score(ras, A, rect[0] + ix * step, rect[1] + iy * step, c)
-            if s > bs:
-                bs, best = s, (ix * step, iy * step)
-    fine = 0.08 if c > 0.7 else 0.05
-    centre = best
-    for iy in range(-6, 7):
-        for ix in range(-6, 7):
-            ox, oy = centre[0] + ix * fine, centre[1] + iy * fine
-            s = _ring_score(ras, A, rect[0] + ox, rect[1] + oy, c)
-            if s > bs:
-                bs, best = s, (ox, oy)
+            grid[(ix, iy)] = _ring_score(ras, A, rect[0] + ix * step, rect[1] + iy * step, c)
+    bs = max(grid.values())
+    ref = min(grid.values())
+    keep = [k for k, v in grid.items() if v >= bs - 0.03 * max(1.0, bs - ref)]
+    best = (sum(k[0] for k in keep) / len(keep) * step, sum(k[1] for k in keep) / len(keep) * step)
     return best, bs
 
 
@@ -202,36 +204,63 @@ def _read_grid(ras, A, x0: float, y0: float, c: float):
 
 
 def _edge_cross(profile: list[float], step: float, lo_mm: float):
-    """Position (mm along the profile) where the values cross the mid level going from ink (start) to paper."""
+    """Position (same unit as ``step``) where ink (start of the profile) ends and paper begins.
+
+    The edge is the integral of the ink fraction ``f = (paper - v) / (paper - ink)`` along the profile: for any
+    symmetric blur and for the area-averaged edge of a rasterised page this equals the true edge position (a
+    mid-level crossing of the linearly interpolated profile is biased by up to a quarter pixel, depending on the
+    sub-pixel phase of the edge).  Returns ``None`` when there is not enough contrast or the ends are not clean.
+    """
     n = len(profile)
-    k = max(2, n // 5)
+    k = max(2, n // 4)
     ink = sum(profile[:k]) / k
     paper = sum(profile[-k:]) / k
     if paper - ink < 40:
         return None
-    mid = (ink + paper) / 2.0
-    for i in range(n - 1):
-        a, b = profile[i], profile[i + 1]
-        if a < mid <= b:
-            return lo_mm + (i + (mid - a) / (b - a)) * step
-    return None
+    f = [min(1.0, max(0.0, (paper - v) / (paper - ink))) for v in profile]
+    if f[0] < 0.7 or f[-1] > 0.3:
+        return None
+    area = (sum(f) - 0.5 * (f[0] + f[-1])) * step
+    return lo_mm + area
 
 
-def _fit_line(pts: list[tuple[float, float]], by_x: bool):
-    """Least squares ``y = m x + q`` (``by_x``) or ``x = m y + q``; returns (m, q, rms)."""
+def _fit_line(pts: list[tuple[float, float]], by_x: bool, tol: float | None = None):
+    """Least squares ``y = m x + q`` (``by_x``) or ``x = m y + q``; returns (m, q, rms).
+
+    With ``tol`` the fit is robust: a Theil-Sen line (median pairwise slope) first, then points further than ``tol``
+    from it are dropped before the least squares (an edge profile that crosses a neighbouring feature gives one bad
+    point, which must not tilt the side).  At least four points are kept.
+    """
     xs = [p[0] if by_x else p[1] for p in pts]
     ys = [p[1] if by_x else p[0] for p in pts]
+    if tol is not None and len(xs) > 4:
+        slopes = sorted((ys[j] - ys[i]) / (xs[j] - xs[i]) for i in range(len(xs)) for j in range(i + 1, len(xs))
+                        if xs[j] != xs[i])
+        if slopes:
+            m0 = slopes[len(slopes) // 2]
+            res = sorted(y - m0 * x for x, y in zip(xs, ys))
+            q0 = res[len(res) // 2]
+            keep = [i for i in range(len(xs)) if abs(ys[i] - (m0 * xs[i] + q0)) <= tol]
+            if len(keep) >= 4:
+                xs = [xs[i] for i in keep]
+                ys = [ys[i] for i in keep]
     m, q, rms = _d._linfit(xs, ys)
     return m, q, rms
 
 
 def _refine_corners(ras, A, rect):
-    """Sub-pixel outer corners (mm) of the marker border from edge profiles on the four sides, or ``None``."""
+    """Sub-pixel outer corners (mm) of the marker border from edge profiles on the four sides, or ``None``.
+
+    Profiles run from inside the one-module black border (0.45 module in, so the white payload modules next to it
+    are never sampled even when ``rect`` is a few tenths of a module off) to 0.8 module outside, at quarter-pixel
+    spacing; each is reduced to an edge position by ``_edge_cross`` and the four sides are fitted by lines.
+    """
     x0, y0, x1, y1 = rect
     c = (x1 - x0) / 6.0
-    span = 0.8 * c
-    step = 0.05 * c
-    n = int(2 * span / step) + 1
+    ppm = math.sqrt(abs(A.a * A.e - A.b * A.d)) or 1.0
+    inside, outside = 0.45 * c, 0.8 * c
+    step = 0.25 / ppm
+    n = int((inside + outside) / step) + 1
     sides = {
         # (point on side at t, outward normal)
         "top": (lambda t: (x0 + t * (x1 - x0), y0), (0.0, -1.0)),
@@ -246,14 +275,14 @@ def _refine_corners(ras, A, rect):
         for t in (0.22, 0.32, 0.42, 0.5, 0.58, 0.68, 0.78):
             bx, by = pt(t)
             # profile from inside the border (ink) to outside (paper)
-            prof = [ras.g(*A(bx + nrm[0] * (-span + i * step), by + nrm[1] * (-span + i * step))) for i in range(n)]
-            s = _edge_cross(prof, step, -span)
+            prof = [ras.g(*A(bx + nrm[0] * (-inside + i * step), by + nrm[1] * (-inside + i * step))) for i in range(n)]
+            s = _edge_cross(prof, step, -inside)
             if s is not None:
                 pts.append((bx + nrm[0] * s, by + nrm[1] * s))
         if len(pts) < 4:
             return None
         horizontal = name in ("top", "bottom")
-        m, q, rms = _fit_line(pts, by_x=horizontal)
+        m, q, rms = _fit_line(pts, by_x=horizontal, tol=0.4 / ppm)
         lines[name] = (horizontal, m, q)
         rms_all.append(rms)
 
@@ -271,6 +300,25 @@ def _refine_corners(ras, A, rect):
     return corners, max(rms_all)
 
 
+def _refine_rect(ras, A, x0: float, y0: float, c: float, passes: int = 3):
+    """Iterate ``_refine_corners`` re-centring on the fitted quad; returns ``(corners, rms, x0, y0)`` or ``None``."""
+    res = None
+    for _ in range(passes):
+        ref = _refine_corners(ras, A, [x0, y0, x0 + 6 * c, y0 + 6 * c])
+        if ref is None:
+            break
+        corners, rms = ref
+        res = (corners, rms, x0, y0)
+        cx = sum(p[0] for p in corners) / 4.0
+        cy = sum(p[1] for p in corners) / 4.0
+        nx, ny = cx - 3 * c, cy - 3 * c
+        if math.hypot(nx - x0, ny - y0) < 0.02 * c:
+            x0, y0 = nx, ny
+            break
+        x0, y0 = nx, ny
+    return res
+
+
 def _detect_python(ras, A, markers: list[dict[str, Any]], search: float) -> dict[str, dict[str, Any]]:
     """Locate every drawn marker element of a layout near where ``A`` predicts it."""
     out: dict[str, dict[str, Any]] = {}
@@ -279,17 +327,21 @@ def _detect_python(ras, A, markers: list[dict[str, Any]], search: float) -> dict
         c = (rect[2] - rect[0]) / 6.0
         (ox, oy), score = _locate(ras, A, rect, search)
         x0, y0 = rect[0] + ox, rect[1] + oy
+        ref = _refine_rect(ras, A, x0, y0, c)
+        if ref is not None:
+            # read the payload at the edge-fitted position (the ring locator is only good to a fraction of a module)
+            x0, y0 = ref[2], ref[3]
+            cx = sum(p[0] for p in ref[0]) / 4.0
+            cy = sum(p[1] for p in ref[0]) / 4.0
+            x0, y0 = cx - 3 * c, cy - 3 * c
         grid, contrast = _read_grid(ras, A, x0, y0, c)
         dec = decode_grid(grid)
         found = dec["score"] >= 0.92 and dec["margin"] >= 2 and contrast > 40
         rec: dict[str, Any] = {"found": bool(found), "ring_contrast": round(score, 1), "decoded": dec,
-                               "offset_mm": [round(ox, 3), round(oy, 3)]}
-        if found:
-            ref = _refine_corners(ras, A, [x0, y0, x0 + 6 * c, y0 + 6 * c])
-            if ref is not None:
-                corners_mm, rms = ref
-                rec["corners_mm"] = corners_mm
-                rec["edge_fit_rms_mm"] = rms
+                               "offset_mm": [round(x0 - rect[0], 3), round(y0 - rect[1], 3)]}
+        if found and ref is not None:
+            rec["corners_mm"] = ref[0]
+            rec["edge_fit_rms_mm"] = ref[1]
         out[el["id"]] = rec
     return out
 
@@ -486,21 +538,110 @@ def marker_report(det: dict[str, Any], layout: dict[str, Any], A) -> dict[str, A
     return rep
 
 
+#: the eight dihedral states of a received page (what happened to the page, not the fix):
+#: name -> (mirrored, clockwise rotation in degrees) as ``decode_grid`` reports it for a marker of that page.  ``rotN``
+#: is the page rotated N degrees clockwise; ``transpose`` is mirrored along the top-left to bottom-right diagonal
+#: (PIL ``Image.TRANSPOSE``), ``anti_transpose`` along the top-right to bottom-left one (``Image.TRANSVERSE``).
+ORIENTATIONS: dict[str, tuple[bool, int]] = {
+    "upright": (False, 0), "rot90": (False, 90), "rot180": (False, 180), "rot270": (False, 270),
+    "flip_h": (True, 0), "anti_transpose": (True, 90), "flip_v": (True, 180), "transpose": (True, 270),
+}
+#: PIL ``Image.Transpose`` member that turns a received page of each state back into the upright one (``None`` = none)
+ORIENTATION_FIX: dict[str, str | None] = {
+    "upright": None, "rot90": "ROTATE_90", "rot180": "ROTATE_180", "rot270": "ROTATE_270",
+    "flip_h": "FLIP_LEFT_RIGHT", "flip_v": "FLIP_TOP_BOTTOM", "transpose": "TRANSPOSE", "anti_transpose": "TRANSVERSE",
+}
+_BY_PATTERN = {v: k for k, v in ORIENTATIONS.items()}
+
+
+def _where(name: str, x: float, y: float, w: float, h: float) -> tuple[float, float]:
+    """Where an upright sheet position ``(x, y)`` lands on a ``w`` x ``h`` mm sheet received in state ``name``."""
+    return {
+        "upright": (x, y), "flip_h": (w - x, y), "flip_v": (x, h - y), "rot180": (w - x, h - y),
+        "rot90": (h - y, x), "rot270": (y, w - x), "transpose": (y, x), "anti_transpose": (h - y, w - x),
+    }[name]
+
+
 def _orientation_from_markers(det: dict[str, Any], layout: dict[str, Any]) -> dict[str, Any]:
-    votes: dict[tuple[bool, int], int] = {}
+    """Dihedral state of the page from the detected markers, whatever ids they decoded as.
+
+    Each decoded marker carries the transform of the page in its own module pattern (``mirrored`` + clockwise
+    rotation), and its decoded id names where on an upright sheet that marker belongs.  Every one of the eight states
+    is scored by (a) the markers whose pattern transform equals it and (b) the markers whose decoded id sits, under
+    that state, where the marker was found.  A page rotated 180 degrees therefore reads ``rot180`` although every
+    marker decodes as a different id.  ``verdict`` is ``unknown`` when no marker was read.
+    """
+    els = {e["id"]: e for e in layout["elements"] if e.get("kind") == "marker"}
+    centre = {}
+    by_mid = {}
+    for e in els.values():
+        r = e["rect_mm"]
+        centre[e["id"]] = ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0)
+        by_mid[e["expected"]["marker_id"]] = e["id"]
+    w, h = layout["raster_mm"]
+    tol = 0.1 * max(w, h) / 10.0 + 1.0
+    pattern = {n: 0 for n in ORIENTATIONS}
+    position = {n: 0 for n in ORIENTATIONS}
+    read = other = 0
     for eid, rec in det["markers"].items():
-        if rec.get("found") and rec.get("decoded_id") == rec.get("marker_id"):
-            key = (bool(rec.get("mirrored")), int(rec.get("rotation_deg", 0)))
-            votes[key] = votes.get(key, 0) + 1
-    other = sum(1 for r in det["markers"].values() if r.get("found") and r.get("decoded_id") not in (None, r.get("marker_id")))
-    if not votes:
-        return {"verdict": "unknown", "other_id_markers": other}
-    (mirrored, rot), n = max(votes.items(), key=lambda kv: kv[1])
-    if not mirrored:
-        verdict = "upright" if rot == 0 else f"rot{rot}"
-    else:
-        verdict = {0: "flip_h", 180: "flip_v"}.get(rot, f"mirror_rot{rot}")
-    return {"verdict": verdict, "mirrored": mirrored, "rotation_deg": rot, "votes": n, "other_id_markers": other}
+        if not rec.get("found") or rec.get("decoded_id") is None:
+            continue
+        read += 1
+        if rec["decoded_id"] != rec.get("marker_id"):
+            other += 1
+        key = (bool(rec.get("mirrored")), int(rec.get("rotation_deg", 0)) % 360)
+        if key in _BY_PATTERN:
+            pattern[_BY_PATTERN[key]] += 1
+        src = by_mid.get(rec["decoded_id"])
+        if src is None or eid not in centre:
+            continue
+        for name in ORIENTATIONS:
+            px, py = _where(name, *centre[src], w, h)
+            if math.hypot(px - centre[eid][0], py - centre[eid][1]) <= tol:
+                position[name] += 1
+    if not read:
+        return {"verdict": "unknown", "other_id_markers": other, "votes": 0}
+    score = {n: pattern[n] + position[n] for n in ORIENTATIONS}
+    ranked = sorted(score.items(), key=lambda kv: (-kv[1], kv[0] != "upright"))
+    best, n = ranked[0]
+    mirrored, rot = ORIENTATIONS[best]
+    return {"verdict": best, "mirrored": mirrored, "rotation_deg": rot, "votes": pattern[best],
+            "position_votes": position[best], "other_id_markers": other, "fix": ORIENTATION_FIX[best],
+            "ambiguous": n == 0 or ranked[1][1] == n}
+
+
+def detect_orientation(image, layout: dict[str, Any], scan_dpi: float | None = None, search_mm: float = 3.0) -> dict[str, Any]:
+    """Which of the eight dihedral states a received page is in, from the layout's eight edge / corner markers alone.
+
+    Unlike the per-marker vote of ``marker_report`` this needs no page fit, so it also names the states that swap the
+    sheet's axes (``rot90``, ``rot270``, ``transpose``, ``anti_transpose``): the raster is transformed by each
+    candidate fix, the markers are decoded where an upright page has them (pure-Python detector, seeded by the raster
+    size over the sheet size) and the fix under which most of them decode as themselves, unrotated and unmirrored,
+    wins.  ``scan_dpi`` is ignored when the raster covers the whole sheet (the usual case).  Returns ``{"available":
+    False}`` for a layout without markers.
+    """
+    from PIL import Image
+
+    marks = [e for e in layout["elements"] if e.get("kind") == "marker" and e.get("drawn", True) and e["id"].startswith("marker_")]
+    if len(marks) < 3:
+        return {"available": False, "verdict": None}
+    sub = dict(layout, elements=marks)
+    rw, rh = layout["raster_mm"]
+    scored = []
+    for name in ORIENTATIONS:
+        fix = ORIENTATION_FIX[name]
+        cand = image if fix is None else image.transpose(getattr(Image.Transpose, fix))
+        ras = _d._Raster(cand)
+        A = _d._Affine(cand.size[0] / rw, 0.0, 0.0, 0.0, cand.size[1] / rh, 0.0)
+        det = detect_markers(cand, ras, A, sub, detector="python", search_mm=search_mm)
+        n = sum(1 for r in det["markers"].values()
+                if r.get("found") and r.get("decoded_id") == r.get("marker_id") and r.get("rotation_deg") == 0 and not r.get("mirrored"))
+        scored.append((n, name))
+    scored.sort(key=lambda t: (-t[0], t[1] != "upright"))
+    top, second = scored[0], scored[1]
+    mirrored, rot = ORIENTATIONS[top[1]]
+    return {"available": True, "verdict": top[1], "fix": ORIENTATION_FIX[top[1]], "rotation_deg": rot, "mirrored": mirrored,
+            "found": top[0], "runner_up_found": second[0], "ambiguous": top[0] < 2 or second[0] >= top[0]}
 
 
 # ------------------------------------------------------------------------------------------------ boards

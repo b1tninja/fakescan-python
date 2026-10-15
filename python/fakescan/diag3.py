@@ -108,10 +108,13 @@ def _is_mono(ras) -> bool:
     return n == 0
 
 
-def _fit(ras, lay, init):
+def _fit(ras, lay, init, scan_dpi: float | None = None):
     """Affine fit from the registration crosses, rejecting clutter: a cross that scores below
     ``WEAK_CROSS_REL`` x the best score (or ``WEAK_CROSS_ABS`` x the page contrast) is not a cross; fewer than three
-    real crosses is ``fit: failed``.  A fourth cross that disagrees with the other three is dropped."""
+    real crosses is ``fit: failed``.  A fourth cross that disagrees with the other three is dropped.  The plausibility
+    test (scale within 0.4x..2.5x, skew under 20 degrees) is relative to the *analysis* dpi: ``scan_dpi`` when given,
+    else the layout's ``dpi_effective`` (a layout generated at 400 dpi and analysed on a 150 dpi raster needs
+    ``scan_dpi=150``)."""
     els = _d.elements_by_id(lay)
     regs = [els[i] for i in ("reg_tl", "reg_tr", "reg_bl", "reg_br") if i in els and els[i].get("drawn", True)]
     rw, rh = lay["raster_mm"]
@@ -157,7 +160,7 @@ def _fit(ras, lay, init):
             info["dropped_cross"] = accepted[worst][0]
             accepted = [f for i, f in enumerate(accepted) if i != worst]
             A = _d._Affine.fit([f[1] for f in accepted], [f[2] for f in accepted])
-    nominal = lay["dpi_effective"] / 25.4
+    nominal = (scan_dpi or lay["dpi_effective"]) / 25.4
     dec = A.decompose()
     sx, sy = dec["px_per_mm_x"], dec["px_per_mm_y"]
     if not (0.4 < sx / nominal < 2.5 and 0.4 < sy / nominal < 2.5) or abs(dec["skew_deg"]) > 20.0:
@@ -601,7 +604,7 @@ def analyze_v3(image, layout: dict[str, Any], scan_dpi: float | None = None, ini
     """
     ras = _d._Raster(image)
     nominal = (scan_dpi or layout["dpi_effective"]) / 25.4
-    A, geo = _fit(ras, layout, _d._Affine(*init) if init else None)
+    A, geo = _fit(ras, layout, _d._Affine(*init) if init else None, scan_dpi)
     mdet = None
     if A is None and marker_fallback:
         crosses_info = dict(geo)
@@ -620,6 +623,15 @@ def analyze_v3(image, layout: dict[str, Any], scan_dpi: float | None = None, ini
     }
     if A is None:
         report["summary"] = {"fit": "failed", "reason": geo.get("reason"), "crosses_found": geo.get("crosses_found")}
+        if any(e.get("kind") == "marker" and e.get("drawn", True) for e in layout["elements"]):
+            # no page fit, but a page that arrived turned by 90 degrees or transposed can still be named from its markers
+            try:
+                o = _m.detect_orientation(image, layout)
+            except Exception:  # pragma: no cover - the failure report must survive
+                o = None
+            if o and o.get("available") and not o.get("ambiguous"):
+                report["markers"] = {"orientation": o}
+                report["summary"]["marker_orientation"] = o["verdict"]
         return report
     geo.update(_geometry(A, nominal))
     # independent check: the ArUco markers must be where the fit says (needs a revision-1 layout)
