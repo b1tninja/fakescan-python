@@ -402,19 +402,6 @@ def test_boards_without_cv2_report_circles_and_say_what_is_missing():
 
 
 # ------------------------------------------------------------------------------------------------ analyzer accuracy (rev. 1 fixes)
-def _touches_media_outline(lay, r, tol=1.5):
-    """A dashed media-outline line (drawn on the sheet, e.g. the Statement outline on Letter) running along the marker."""
-    for o in lay["elements"]:
-        if o["kind"] != "media_outline":
-            continue
-        a = o["rect_mm"]
-        if any(r[0] - tol <= x <= r[2] + tol and a[1] <= r[3] and a[3] >= r[1] for x in (a[0], a[2])):
-            return True
-        if any(r[1] - tol <= y <= r[3] + tol and a[0] <= r[2] and a[2] >= r[0] for y in (a[1], a[3])):
-            return True
-    return False
-
-
 @pytest.mark.parametrize("dpi", [100, 150, 200, 300, 600])
 @pytest.mark.parametrize("paper", ["A4", "LETTER", "A5"])
 def test_clean_render_markers_all_found_and_worst_corner_under_a_third_of_a_pixel(paper, dpi):
@@ -427,10 +414,26 @@ def test_clean_render_markers_all_found_and_worst_corner_under_a_third_of_a_pixe
     for e in markers_of(lay):
         r = det["markers"][e["id"]]
         assert r["decoded_id"] == r["marker_id"] and r["rotation_deg"] == 0 and not r["mirrored"], e["id"]
-        if _touches_media_outline(lay, e["rect_mm"]):
-            continue  # real ink on the marker's edge (the generator draws the outlines of other papers over the sheet)
         worst = max(worst, max(math.dist(A(*c), q) for c, q in zip(e["expected"]["corners_mm"], r["corners_px"])))
     assert worst < 0.3, worst
+
+
+@pytest.mark.parametrize("dpi", [100, 300, 600])
+def test_letter_markers_including_charuco_have_no_outline_ink_on_their_edges(dpi):
+    # the dashed Statement / A5 / A6 outlines used to cross the ChArUco markers (11-13) and pull edge fits by up to 2.5 px
+    lay, img = pages("LETTER", dpi, {})
+    k = lay["px_per_mm"]
+    A = diag._Affine(k, 0.0, 0.0, 0.0, k, 0.0)
+    det = dm.detect_markers(img, diag._Raster(img), A, lay, detector="python")
+    ids = [e["id"] for e in markers_of(lay)]
+    assert {"charuco_marker_11", "charuco_marker_12", "charuco_marker_13"} <= set(ids)
+    for e in markers_of(lay):
+        r = det["markers"][e["id"]]
+        err = max(math.dist(A(*c), q) for c, q in zip(e["expected"]["corners_mm"], r["corners_px"]))
+        assert err < 0.3, (e["id"], err)
+    outlines = [o for o in lay["elements"] if o["kind"] == "media_outline" and o["drawn"]]
+    assert outlines and all("clipped_by" in o["expected"] for o in outlines)
+    assert any(o["expected"]["clipped_by"] for o in outlines)
 
 
 def test_marker_mr_edge_fit_works_at_600_dpi():
@@ -453,7 +456,7 @@ def test_marker_edges_survive_resampling_and_sub_pixel_offsets():
         det = dm.detect_markers(img, diag._Raster(img), A, lay, detector="python")
         assert det["n_found"] == det["n_expected"]
         worst = max(max(math.dist(A(*c), q) for c, q in zip(e["expected"]["corners_mm"], det["markers"][e["id"]]["corners_px"]))
-                    for e in markers_of(lay) if not _touches_media_outline(lay, e["rect_mm"]))
+                    for e in markers_of(lay))
         assert worst < 0.5, (flt, worst)
 
 
