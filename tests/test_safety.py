@@ -177,6 +177,11 @@ def test_legacy_env_names_are_deny_patterns():
         assert not p.allowed({"uuid": FAKE, "name": f"dev {word} x"})
 
 
+def test_from_env_takes_extra_deny_patterns():
+    p = Policy.from_env({"PDFCRAFT_SCAN_DENY": "a"}, deny=["b"], queue_resolver=None)
+    assert p.deny == ("a", "b")
+
+
 def test_from_env_reads_the_process_environment(monkeypatch):
     for n in safety.LEGACY_DENY_ENVS:
         monkeypatch.delenv(n, raising=False)

@@ -343,12 +343,14 @@ class Policy:
 
     # -- construction -------------------------------------------------------------------------------
     @classmethod
-    def from_env(cls, env: Mapping[str, str] | None = None, **kw: Any) -> "Policy":
+    def from_env(cls, env: Mapping[str, str] | None = None, *, deny: Iterable[str] = (), **kw: Any) -> "Policy":
+        """The policy of the environment (``deny`` adds patterns of the caller to those of the environment)."""
         env = os.environ if env is None else env
-        mode, deny = _parse_policy(env.get(POLICY_ENV, ""))
+        mode, patterns = _parse_policy(env.get(POLICY_ENV, ""))
         for name in LEGACY_DENY_ENVS:
-            deny.extend(_split_patterns(env.get(name, "")))
-        return cls(mode=mode, deny=deny, **kw)
+            patterns.extend(_split_patterns(env.get(name, "")))
+        patterns.extend(deny)
+        return cls(mode=mode, deny=patterns, **kw)
 
     def with_allowed_names(self, *names: str) -> "Policy":
         """A copy that also lets devices named exactly ``names`` through (the ``real_device_ok`` marker). Deny
