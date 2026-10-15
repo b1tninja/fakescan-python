@@ -216,3 +216,29 @@ without a page fit. The pure-Python marker corners are within 0.3 px of the trut
 
 Layout and report format: `docs/diag-page-v3.md` (default, parametric) and `docs/diag-page-v2.md` in the fakescan repo. Needs the native module built with
 `maturin develop`.
+
+## Test-harness device protection (`fakescan.safety`)
+
+Pure Python, standard library only; nothing of it lives in Rust. It keeps a Python test harness away from real scanners
+and printers: a device is touched only when it is **provably a fake**. Identity is a UUID in the fakes' namespace
+(`FAKE_UUID_PREFIX = "00000000-0000-4000-8000-"`), never a name; loopback URLs (the embedded servers) count as fake;
+anything that cannot be decided (no uuid known, "use the default device", an unresolvable spooler queue) is excluded.
+
+```python
+from fakescan import safety
+safety.is_fake("urn:uuid:00000000-0000-4000-8000-000000000001")      # True  (any WIA / WSD / URL shape)
+safety.Policy.from_env().allowed({"id": "wia:{...}\0000", "port": "urn:uuid:..."})   # a WIA row: proven by its port
+safety.assert_fake(ref, "open")                    # raises DeviceNotAllowed (the text never carries an id/address/name)
+safety.install()                                   # guard pdfcraft.wsdprint / printing / scan / scanning, fakeprint.PrintClient / winprint in place
+guarded = safety.guarded(pdfcraft.printing.Registry())      # or a guarded proxy of one module / object
+@safety.guard_open("url")                          # or wrap your own device-touching function
+def talk(url): ...
+```
+
+Environment: `PDFCRAFT_TEST_DEVICE_POLICY` = `fakes-only` (default) | `deny=a,b;c` | `fakes-only,deny=...` (`deny=` only ever
+adds exclusions; matching is substring, case and punctuation insensitive, on id / name / port / url). The legacy names
+`CRAFT_SCAN_DENY`, `PDFCRAFT_SCAN_DENY`, `CRAFT_PRINT_DENY`, `PDFCRAFT_PRINT_DENY` are read as deny patterns too.
+pytest: `pytest_plugins = ["fakescan.safety_pytest"]` installs the guard before collection, adds the autouse fixture
+`device_policy`, a startup self-check (`register_target_provider`) and the marker `real_device_ok("<exact name>")`
+(skipped unless `PDFCRAFT_ALLOW_REAL_DEVICE_TESTS` equals the token). Not protected: GUI executables and anything that
+bypasses the Python modules (see `pdfcraft-notes/python-device-safety.md`).
