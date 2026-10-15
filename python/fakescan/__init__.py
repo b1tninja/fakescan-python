@@ -12,7 +12,7 @@ from .client import (
     after_pages,
     mid_page,
 )
-from . import registry, tray
+from . import diag, registry, tray
 from .ui import FeederInfo, ProfileInfo, StatusRow, format_status_table, summary_level
 from .manager import Manager
 from .registry import DeviceRow, ManagedDevice, ReconcileResult, match_wia_to_devices
@@ -45,6 +45,7 @@ __all__ = [
     "format_status_table",
     "summary_level",
     "tray",
+    "diag",
     "DeviceHandle",
     "Job",
     "LoopbackInfo",

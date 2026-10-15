@@ -177,3 +177,20 @@ The local matrix honors `CARGO_TARGET_DIR`.
 ## License
 
 MIT OR Apache-2.0.
+
+
+## The `diag` test page: layout, rendering, analyzer
+
+`fakescan.diag` exposes the ground-truth layout of the `diag` page (layout v2: print marks, rulers, resolution, colour and
+geometry targets; sizes and expected values in mm), renders it, and analyzes a scanned or printed-back raster per element
+(scale x/y, rotation, shear, margin offsets and clipped frame edges, ruler dpi, colour error, hue error, last resolvable
+pitch, Sierpinski level, ...):
+
+```python
+from fakescan import diag
+layout = diag.diag_page_layout(100)
+report = diag.analyze_diag_page(scan_image, layout)   # needs Pillow
+```
+
+Layout and report format: `docs/diag-page-v2.md` in the fakescan repo. Needs the native module built with
+`maturin develop`.

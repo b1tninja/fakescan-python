@@ -44,7 +44,9 @@ impl Server {
         devices: Option<Vec<DeviceSpec>>,
         initial_pages: Option<u32>,
     ) -> PyResult<Self> {
-        let ip: IpAddr = host.parse().map_err(|e| PyRuntimeError::new_err(format!("host {host}: {e}")))?;
+        let ip: IpAddr = host
+            .parse()
+            .map_err(|e| PyRuntimeError::new_err(format!("host {host}: {e}")))?;
         let mut cfg = ServerConfig::lab(profiles, profile);
         cfg.listen = SocketAddr::new(ip, port);
         cfg.wsd = wsd;
@@ -61,7 +63,8 @@ impl Server {
             let mut out = Vec::new();
             for (id, prof, uuid, name, pages) in list {
                 let uuid = match uuid {
-                    Some(t) => Uuid::parse_str(&t).map_err(|e| PyRuntimeError::new_err(format!("device {id}: uuid: {e}")))?,
+                    Some(t) => Uuid::parse_str(&t)
+                        .map_err(|e| PyRuntimeError::new_err(format!("device {id}: uuid: {e}")))?,
                     None => fakescan::lab::random_fake_uuid(),
                 };
                 let mut d = DeviceConfig::new(id, prof, uuid);
@@ -72,11 +75,14 @@ impl Server {
             // The first device is the default one and may keep the lab UUID when none was given.
             cfg.devices = out;
         } else if let Some(text) = device_uuid {
-            cfg.devices[0].device_uuid =
-                Uuid::parse_str(text).map_err(|e| PyRuntimeError::new_err(format!("device_uuid: {e}")))?;
+            cfg.devices[0].device_uuid = Uuid::parse_str(text)
+                .map_err(|e| PyRuntimeError::new_err(format!("device_uuid: {e}")))?;
         }
         if let Some(text) = advertise {
-            cfg.advertise = Some(text.parse().map_err(|e| PyRuntimeError::new_err(format!("advertise {text}: {e}")))?);
+            cfg.advertise = Some(
+                text.parse()
+                    .map_err(|e| PyRuntimeError::new_err(format!("advertise {text}: {e}")))?,
+            );
         }
 
         let (ready_tx, ready_rx) = oneshot::channel();
@@ -90,7 +96,9 @@ impl Server {
                     .build()?;
                 runtime.block_on(serve(cfg, Some(ready_tx), Some(stop_rx)))
             })
-            .map_err(|e| PyRuntimeError::new_err(format!("could not start the server thread: {e}")))?;
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("could not start the server thread: {e}"))
+            })?;
 
         match py.allow_threads(|| ready_rx.blocking_recv()) {
             Ok(ready) => Ok(Self {
@@ -105,7 +113,9 @@ impl Server {
                     Ok(Ok(())) => "exited before listening".to_string(),
                     Err(_) => "panicked while starting".to_string(),
                 };
-                Err(PyRuntimeError::new_err(format!("fakescan server failed to start: {reason}")))
+                Err(PyRuntimeError::new_err(format!(
+                    "fakescan server failed to start: {reason}"
+                )))
             }
         }
     }
@@ -118,7 +128,11 @@ impl Server {
     #[getter]
     fn base_url(&self) -> String {
         let ip = self.ready.local_addr.ip();
-        let host = if ip.is_unspecified() { "127.0.0.1".to_string() } else { ip.to_string() };
+        let host = if ip.is_unspecified() {
+            "127.0.0.1".to_string()
+        } else {
+            ip.to_string()
+        };
         format!("http://{host}:{}", self.ready.local_addr.port())
     }
 
@@ -133,7 +147,14 @@ impl Server {
         self.ready
             .devices
             .iter()
-            .map(|d| (d.id.clone(), d.uuid.to_string(), d.profile.clone(), d.friendly_name.clone()))
+            .map(|d| {
+                (
+                    d.id.clone(),
+                    d.uuid.to_string(),
+                    d.profile.clone(),
+                    d.friendly_name.clone(),
+                )
+            })
             .collect()
     }
 
@@ -155,7 +176,11 @@ impl Server {
             let result = py.allow_threads(|| thread.join());
             match result {
                 Ok(Ok(())) => {}
-                Ok(Err(e)) => return Err(PyRuntimeError::new_err(format!("fakescan server stopped with an error: {e:#}"))),
+                Ok(Err(e)) => {
+                    return Err(PyRuntimeError::new_err(format!(
+                        "fakescan server stopped with an error: {e:#}"
+                    )))
+                }
                 Err(_) => return Err(PyRuntimeError::new_err("fakescan server thread panicked")),
             }
         }
@@ -173,7 +198,11 @@ impl Server {
     }
 
     fn __repr__(&self) -> String {
-        format!("Server({}, uuid={})", self.base_url(), self.ready.device_uuid)
+        format!(
+            "Server({}, uuid={})",
+            self.base_url(),
+            self.ready.device_uuid
+        )
     }
 }
 
@@ -186,9 +215,50 @@ impl Drop for Server {
     }
 }
 
+/// Ground-truth layout of the `diag` page as a JSON string (see `fakescan.diag`).
+#[pyfunction]
+#[pyo3(signature = (dpi=100, version=2))]
+fn diag_layout_json(dpi: u32, version: u32) -> String {
+    fakescan::diag_v2::layout_json(dpi, version).to_string()
+}
+
+/// The `diag` page as `(width, height, RGB bytes)` (banner and QR included).
+#[pyfunction]
+#[pyo3(signature = (dpi=100, page=0, version=2))]
+fn diag_render_rgb(
+    py: Python<'_>,
+    dpi: u32,
+    page: u32,
+    version: u32,
+) -> PyResult<(u32, u32, Py<pyo3::types::PyBytes>)> {
+    let img = fakescan::diag_v2::render(dpi, page, version)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let (w, h) = img.dimensions();
+    Ok((w, h, pyo3::types::PyBytes::new(py, img.as_raw()).unbind()))
+}
+
+/// The `diag` page as PNG bytes with the sRGB colour space declared.
+#[pyfunction]
+#[pyo3(signature = (dpi=100, page=0, version=2))]
+fn diag_render_png(
+    py: Python<'_>,
+    dpi: u32,
+    page: u32,
+    version: u32,
+) -> PyResult<Py<pyo3::types::PyBytes>> {
+    let img = fakescan::diag_v2::render(dpi, page, version)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let png =
+        fakescan::diag_v2::png_bytes(&img).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    Ok(pyo3::types::PyBytes::new(py, &png).unbind())
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<Server>()?;
+    m.add_function(wrap_pyfunction!(diag_layout_json, m)?)?;
+    m.add_function(wrap_pyfunction!(diag_render_rgb, m)?)?;
+    m.add_function(wrap_pyfunction!(diag_render_png, m)?)?;
     Ok(())
 }
