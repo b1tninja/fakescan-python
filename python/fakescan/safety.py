@@ -711,8 +711,8 @@ SINKS: tuple[Sink, ...] = (
     _S("pdfcraft.printing", "Registry", "printer_details", "open", ("printer_id",)),
     _S("pdfcraft.printing", "Registry", "submit", "submit", ("printer", "job.printer"), any_required=True,
        aliases=("submit_job",), remember_result=True),
-    _S("pdfcraft.printing", "Registry", "job_status", "open", ("job_id",), as_text=True),
-    _S("pdfcraft.printing", "Registry", "cancel_job", "open", ("job_id",), as_text=True),
+    # job_status / cancel_job take a job handle of a printer that was registered (and so checked) already; the system
+    # spooler gives no handles. They are PURE below: refusing a handle would only break "unknown job" error paths.
     _S("pdfcraft.printing", "Registry", "list_jobs", "open", ("printer_id",)),
     _S("pdfcraft.printing", "Registry", "find_job", "open", ("printer_id",)),
     _S("pdfcraft.printing", "PrintJob", "__init__", "submit", ("job.printer",)),
@@ -737,6 +737,13 @@ SINKS: tuple[Sink, ...] = (
     _S("pdfcraft.scanning", "AttemptPlan", "start", "scan", ("self.settings.device",), exempt=("registry",)),
     _S("pdfcraft.scanning", "RunningAttempt", "__init__", "scan", ("plan.settings.device",), exempt=("registry",)),
     _S("pdfcraft.scanning", "ScanJob", "start_attempt", "scan", ("plan.settings.device",), exempt=("self._registry",)),
+    # --- fakescan's WSD scan client (it can be pointed at any address): the base url is the device
+    _S("fakescan.soap", None, "create_scan_job", "scan", ("base_url",)),
+    _S("fakescan.soap", None, "get_scanner_elements", "open", ("base_url",)),
+    _S("fakescan.soap", None, "retrieve_image_bytes", "scan", ("base_url",)),
+    _S("fakescan.soap", None, "acquire_pages", "scan", ("base_url",)),
+    _S("fakescan.soap", None, "acquire_jfif_pages", "scan", ("base_url",)),
+    _S("fakescan.soap", None, "acquire_dib_platen", "scan", ("base_url",)),
     # --- fakeprint (the harness' own clients)
     _S("fakeprint.soap", "PrintClient", "__init__", "open", ("endpoint",)),
     _S("fakeprint.winprint", None, "print_raw", "submit", custom="winprint"),
@@ -753,6 +760,7 @@ PURE: frozenset[str] = frozenset("""
 pdfcraft.wsdprint.*
 pdfcraft.printing.choose_resolution pdfcraft.printing.capability_view pdfcraft.printing.ipp_job_id
 pdfcraft.printing.parse_ipp_job_id
+pdfcraft.printing.Registry.__init__ pdfcraft.printing.Registry.job_status pdfcraft.printing.Registry.cancel_job
 pdfcraft.printing.Registry.backend_info pdfcraft.printing.Registry.backend_names pdfcraft.printing.Registry.clear_converter
 pdfcraft.printing.Registry.events_status pdfcraft.printing.Registry.has_converter pdfcraft.printing.Registry.ipp_version_of
 pdfcraft.printing.Registry.maintain_events pdfcraft.printing.Registry.set_converter pdfcraft.printing.Registry.shutdown_events
@@ -765,6 +773,7 @@ pdfcraft.scanning.AttemptPlan.*
 pdfcraft.scanning.RunningAttempt.*
 fakeprint.winprint.describe_printers fakeprint.winprint.wsd_port_uuid
 fakeprint.soap.PrintClient.*
+fakescan.soap.get_scanner_status fakescan.soap.format_magic_ok fakeprint.soap.parse_fault
 """.split())
 # ``Class.*`` / ``module.*`` entries are prefixes: the sinks listed in SINKS take precedence over them.
 
