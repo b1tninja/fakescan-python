@@ -126,8 +126,10 @@ def test_v2_only_adds_elements_in_declared_regions(layout):
 
 
 def test_old_analyzer_results_do_not_change_on_the_v2_page():
-    root = Path(os.environ.get("PDFCRAFT_FAKESCAN", "D:/code/pdfcraft-fakescan"))
-    path = root / "pdfcraft_fakescan" / "pattern_analyzer.py"
+    root = os.environ.get("PDFCRAFT_FAKESCAN")
+    if not root:
+        pytest.skip("set PDFCRAFT_FAKESCAN to a pdfcraft-fakescan checkout to compare with its analyzer")
+    path = Path(root) / "pdfcraft_fakescan" / "pattern_analyzer.py"
     if not path.exists():
         pytest.skip("pdfcraft_fakescan.pattern_analyzer not available")
     spec = importlib.util.spec_from_file_location("pa_compat", path)
