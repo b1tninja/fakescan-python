@@ -188,9 +188,11 @@ pitch, Sierpinski level, ...):
 
 ```python
 from fakescan import diag
-layout = diag.diag_page_layout(100)
+layout = diag.diag_page_layout(100, paper="A4")        # layout v3, any sheet size (paper="LETTER", "210x297", ...)
 report = diag.analyze_diag_page(scan_image, layout)   # needs Pillow
+vector = diag.diag_page_primitives(layout)            # mm primitives for a vector PDF
+layout_v2 = diag.diag_page_layout(100, version=2)     # the fixed-size layout (blind pattern analyzer)
 ```
 
-Layout and report format: `docs/diag-page-v2.md` in the fakescan repo. Needs the native module built with
+Layout and report format: `docs/diag-page-v3.md` (default, parametric) and `docs/diag-page-v2.md` in the fakescan repo. Needs the native module built with
 `maturin develop`.

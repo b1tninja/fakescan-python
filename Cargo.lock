@@ -503,6 +503,7 @@ dependencies = [
  "anyhow",
  "fakescan",
  "pyo3",
+ "serde_json",
  "tokio",
  "uuid",
 ]

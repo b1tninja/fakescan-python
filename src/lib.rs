@@ -215,42 +215,87 @@ impl Drop for Server {
     }
 }
 
-/// Ground-truth layout of the `diag` page as a JSON string (see `fakescan.diag`).
-#[pyfunction]
-#[pyo3(signature = (dpi=100, version=2))]
-fn diag_layout_json(dpi: u32, version: u32) -> String {
-    fakescan::diag_v2::layout_json(dpi, version).to_string()
+/// Layout-v3 page spec from the Python keyword arguments (JSON object text; `dpi` / `page` defaults).
+fn v3_spec(dpi: u32, page: u32, params: Option<&str>) -> PyResult<fakescan::diag_v3::PageSpec> {
+    let mut v: serde_json::Value = match params {
+        Some(p) if !p.trim().is_empty() => serde_json::from_str(p).map_err(|e| PyRuntimeError::new_err(e.to_string()))?,
+        _ => serde_json::json!({}),
+    };
+    let o = v
+        .as_object_mut()
+        .ok_or_else(|| PyRuntimeError::new_err("params must be a JSON object"))?;
+    o.entry("dpi").or_insert(serde_json::json!(dpi));
+    o.entry("page").or_insert(serde_json::json!(page));
+    fakescan::diag_v3::PageSpec::from_json(&v).map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
-/// The `diag` page as `(width, height, RGB bytes)` (banner and QR included).
+/// Ground-truth layout of the `diag` page as a JSON string (see `fakescan.diag`). Version 3 is the
+/// parametric generator (`params`: JSON object of paper, orientation, margin_mm, ...); versions 1 and 2
+/// are the fixed-size layouts.
 #[pyfunction]
-#[pyo3(signature = (dpi=100, page=0, version=2))]
+#[pyo3(signature = (dpi=100, version=3, params=None))]
+fn diag_layout_json(dpi: u32, version: u32, params: Option<&str>) -> PyResult<String> {
+    if version >= 3 {
+        let spec = v3_spec(dpi, 0, params)?;
+        return Ok(fakescan::diag_v3::build_layout(&spec).json().to_string());
+    }
+    Ok(fakescan::diag_v2::layout_json(dpi, version).to_string())
+}
+
+/// The `diag` page as `(width, height, RGB bytes)` (banner and QR included for v1 / v2).
+#[pyfunction]
+#[pyo3(signature = (dpi=100, page=0, version=3, params=None))]
 fn diag_render_rgb(
     py: Python<'_>,
     dpi: u32,
     page: u32,
     version: u32,
+    params: Option<&str>,
 ) -> PyResult<(u32, u32, Py<pyo3::types::PyBytes>)> {
-    let img = fakescan::diag_v2::render(dpi, page, version)
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let img = if version >= 3 {
+        fakescan::diag_v3::render(&v3_spec(dpi, page, params)?).0
+    } else {
+        fakescan::diag_v2::render(dpi, page, version).map_err(|e| PyRuntimeError::new_err(e.to_string()))?
+    };
     let (w, h) = img.dimensions();
     Ok((w, h, pyo3::types::PyBytes::new(py, img.as_raw()).unbind()))
 }
 
-/// The `diag` page as PNG bytes with the sRGB colour space declared.
+/// The `diag` page as PNG bytes with the sRGB colour space declared (v3 also carries the physical size).
 #[pyfunction]
-#[pyo3(signature = (dpi=100, page=0, version=2))]
+#[pyo3(signature = (dpi=100, page=0, version=3, params=None))]
 fn diag_render_png(
     py: Python<'_>,
     dpi: u32,
     page: u32,
     version: u32,
+    params: Option<&str>,
 ) -> PyResult<Py<pyo3::types::PyBytes>> {
-    let img = fakescan::diag_v2::render(dpi, page, version)
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-    let png =
-        fakescan::diag_v2::png_bytes(&img).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let png = if version >= 3 {
+        let spec = v3_spec(dpi, page, params)?;
+        let img = fakescan::diag_v3::render(&spec).0;
+        fakescan::diag_v3::png_bytes(&img, spec.dpi)
+    } else {
+        let img = fakescan::diag_v2::render(dpi, page, version).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        fakescan::diag_v2::png_bytes(&img)
+    }
+    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     Ok(pyo3::types::PyBytes::new(py, &png).unbind())
+}
+
+/// Regenerate the page spec (JSON) from a v3 QR payload, or `None` when it is not one.
+#[pyfunction]
+fn diag_spec_from_qr(payload: &str) -> Option<String> {
+    fakescan::diag_v3::PageSpec::from_qr_payload(payload).map(|s| s.json().to_string())
+}
+
+/// Paper names the generator knows (portrait sizes; custom `WxH` mm is always accepted).
+#[pyfunction]
+fn diag_paper_sizes() -> Vec<(String, f64, f64)> {
+    fakescan::diag_v3::paper_names()
+        .into_iter()
+        .filter_map(|n| fakescan::diag_v3::paper_size_mm(n).map(|(w, h)| (n.to_string(), w, h)))
+        .collect()
 }
 
 #[pymodule]
@@ -260,5 +305,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(diag_layout_json, m)?)?;
     m.add_function(wrap_pyfunction!(diag_render_rgb, m)?)?;
     m.add_function(wrap_pyfunction!(diag_render_png, m)?)?;
+    m.add_function(wrap_pyfunction!(diag_spec_from_qr, m)?)?;
+    m.add_function(wrap_pyfunction!(diag_paper_sizes, m)?)?;
     Ok(())
 }

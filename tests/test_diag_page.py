@@ -35,12 +35,12 @@ WHITE = (255, 255, 255)
 
 @pytest.fixture(scope="module")
 def layout():
-    return diag.diag_page_layout(DPI)
+    return diag.diag_page_layout(DPI, version=2)
 
 
 @pytest.fixture(scope="module")
 def page():
-    return diag.render_diag_page(DPI)
+    return diag.render_diag_page(DPI, version=2)
 
 
 @pytest.fixture(scope="module")
@@ -58,12 +58,12 @@ def scaled(img, sx, sy):
 
 # ------------------------------------------------------------------------------------------------- layout
 def test_layout_is_deterministic_versioned_and_declares_srgb(layout):
-    assert layout == diag.diag_page_layout(DPI)
+    assert layout == diag.diag_page_layout(DPI, version=2)
     assert layout["layout_version"] == 2 and layout["colour_space"] == "sRGB"
     assert layout["box_mm"] == [206.0, 288.0]
     assert layout["qr_payload_layout_field"] == "lay=2"
     assert diag.diag_page_layout(DPI, version=1)["layout_version"] == 1
-    a, b = diag.render_diag_png(DPI, 0), diag.render_diag_png(DPI, 0)
+    a, b = diag.render_diag_png(DPI, 0, version=2), diag.render_diag_png(DPI, 0, version=2)
     assert a == b and b"sRGB" in a[:200]
     ids = [e["id"] for e in layout["elements"]]
     assert len(ids) == len(set(ids))
@@ -88,8 +88,8 @@ def test_layout_is_deterministic_versioned_and_declares_srgb(layout):
 
 @pytest.mark.parametrize("dpi", [100, 150, 200])
 def test_layout_samples_match_rendered_pixels(dpi):
-    lay = diag.diag_page_layout(dpi)
-    img = diag.render_diag_page(dpi)
+    lay = diag.diag_page_layout(dpi, version=2)
+    img = diag.render_diag_page(dpi, version=2)
     assert list(img.size) == lay["raster_px"]
     k = lay["px_per_mm"]
     n = 0

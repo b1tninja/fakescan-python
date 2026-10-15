@@ -1,5 +1,9 @@
 """The fakescan ``diag`` test page: ground-truth layout, rendering and a per-element analyzer.
 
+The default is layout v3 (``docs/diag-page-v3.md``): a parametric generator that takes the sheet size (paper name or
+mm), dpi, margins, page / copy / side and returns the layout JSON, vector primitives and raster for any size; its
+analyzer is :mod:`fakescan.diag3`.  The text below describes the fixed-size layout v2 (``version=2``).
+
 Layout v2 of the page (see ``docs/diag-page-v2.md`` in fakescan) carries print marks, rulers, resolution
 targets, colour targets and geometry (Sierpinski triangle, golden construction, circles, hexagon, right-angle
 markers) in the areas layout v1 leaves empty.  This module is the established Python entry point for it:
@@ -33,38 +37,78 @@ __all__ = [
     "render_diag_png",
     "analyze_diag_page",
     "elements_by_id",
+    "diag_page_primitives",
+    "diag_spec_from_qr",
+    "diag_paper_sizes",
     "srgb_to_lab",
     "delta_e76",
 ]
 
-PAGE_LAYOUT_VERSION = 2
+PAGE_LAYOUT_VERSION = 3
 
 
 # --------------------------------------------------------------------------------------------------
 # Generator access
 # --------------------------------------------------------------------------------------------------
-def diag_page_layout(dpi: int = 100, version: int = 2) -> dict[str, Any]:
-    """Ground-truth layout of the ``diag`` page for a requested ``dpi`` (the page renders at the effective dpi)."""
+def _params(**kw: Any) -> str | None:
+    kw = {k: v for k, v in kw.items() if v is not None}
+    return json.dumps(kw) if kw else None
+
+
+def diag_page_layout(dpi: int = 100, version: int = PAGE_LAYOUT_VERSION, **params: Any) -> dict[str, Any]:
+    """Ground-truth layout (and vector primitives) of the ``diag`` page.
+
+    Version 3 (default) is the parametric generator: ``paper`` (``"A4"``, ``"LETTER"``, ``"A3"``, ``"JIS-B5"``,
+    ``"210x297"``, ...), ``orientation``, ``width_mm`` / ``height_mm`` (custom), ``width_px`` / ``height_px`` (exact
+    raster), ``margin_mm``, ``bleed_mm``, ``page``, ``copy``, ``total``, ``side`` (``front`` / ``back``), ``job``,
+    ``colour`` (``rgb`` / ``gray``), ``banner_px``.  Versions 1 and 2 are the fixed-size layouts (``dpi`` is the
+    requested dpi; the page renders at the effective dpi).
+    """
     from . import _native
 
-    return json.loads(_native.diag_layout_json(dpi, version))
+    return json.loads(_native.diag_layout_json(dpi, version, _params(**params)))
 
 
-def render_diag_png(dpi: int = 100, page: int = 0, version: int = 2) -> bytes:
-    """PNG bytes of the page (banner and QR included) with the sRGB colour space declared."""
+def render_diag_png(dpi: int = 100, page: int = 0, version: int = PAGE_LAYOUT_VERSION, **params: Any) -> bytes:
+    """PNG bytes of the page with the sRGB colour space (and, for v3, the physical size) declared."""
     from . import _native
 
-    return bytes(_native.diag_render_png(dpi, page, version))
+    return bytes(_native.diag_render_png(dpi, page, version, _params(**params)))
 
 
-def render_diag_page(dpi: int = 100, page: int = 0, version: int = 2):
-    """The page as an RGB ``PIL.Image`` (needs Pillow)."""
+def render_diag_page(dpi: int = 100, page: int = 0, version: int = PAGE_LAYOUT_VERSION, **params: Any):
+    """The page as an RGB ``PIL.Image`` (needs Pillow); same keyword parameters as :func:`diag_page_layout`."""
     from PIL import Image
 
     from . import _native
 
-    w, h, data = _native.diag_render_rgb(dpi, page, version)
+    w, h, data = _native.diag_render_rgb(dpi, page, version, _params(**params))
     return Image.frombytes("RGB", (w, h), bytes(data))
+
+
+def diag_page_primitives(layout: dict[str, Any]) -> list[dict[str, Any]]:
+    """Vector drawing primitives of a v3 layout (mm, page coordinates, in paint order).
+
+    ``op`` is one of rect, polygon, line, circle, text, grating, ticks (``vector: true``: draw them with any
+    vector backend) or ramp, hue_wheel, siemens_star, zone_plate, halftone, qr (``vector: false``: raster-only, crop
+    the element rectangle from :func:`render_diag_page`, or draw the QR yourself from ``payload``).
+    """
+    return list(layout.get("primitives", []))
+
+
+def diag_spec_from_qr(payload: str) -> dict[str, Any] | None:
+    """Page parameters (as accepted by :func:`diag_page_layout`) from a v3 QR payload, or ``None``."""
+    from . import _native
+
+    r = _native.diag_spec_from_qr(payload)
+    return json.loads(r) if r else None
+
+
+def diag_paper_sizes() -> dict[str, tuple[float, float]]:
+    """Named paper sizes in mm (portrait width, height); ``WxH`` custom sizes are always accepted."""
+    from . import _native
+
+    return {n: (w, h) for n, w, h in _native.diag_paper_sizes()}
 
 
 def elements_by_id(layout: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -1054,7 +1098,7 @@ def _analyze_line_grid(ras: _Raster, A: _Affine, el: dict[str, Any], nominal: fl
 # --------------------------------------------------------------------------------------------------
 def analyze_diag_page(image, layout: dict[str, Any] | None = None, dpi: int | None = None, scan_dpi: float | None = None,
                       init: tuple[float, float, float, float, float, float] | None = None) -> dict[str, Any]:
-    """Per-element report for a scanned / printed-back ``diag`` layout-v2 page.
+    """Per-element report for a scanned / printed-back ``diag`` page (layout v3: ``fakescan.diag3``; v2 below).
 
     ``image``: PIL image of the page (any size).  ``layout``: from :func:`diag_page_layout` (default: built for
     ``dpi``, default 100).  ``scan_dpi``: the resolution the raster is *supposed* to have (default: the layout's
@@ -1062,8 +1106,12 @@ def analyze_diag_page(image, layout: dict[str, Any] | None = None, dpi: int | No
     affine ``(a, b, c, d, e, f)`` (px = a*x + b*y + c, ...) for pages that are shifted or scaled a lot; the default
     assumes the raster shows the whole sheet.
     """
-    ras = _Raster(image)
     lay = layout or diag_page_layout(dpi or 100)
+    if lay["layout_version"] >= 3:
+        from .diag3 import analyze_v3
+
+        return analyze_v3(image, lay, scan_dpi=scan_dpi, init=init)
+    ras = _Raster(image)
     if lay["layout_version"] < 2:
         raise ValueError("analyze_diag_page needs a layout-v2 layout")
     nominal = (scan_dpi or lay["dpi_effective"]) / 25.4
