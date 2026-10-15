@@ -527,6 +527,22 @@ def test_winprint_only_prints_to_queues_proven_by_their_registry_uuid(monkeypatc
         sys.modules.pop("_fake_winprint", None)
 
 
+def test_assert_fake_queue_uses_the_registry_uuid_not_the_name():
+    mod, calls = _fake_winprint()
+    try:
+        p = pol()
+        safety.assert_fake_queue("fake inkjet", policy=p, module=mod)
+        assert safety.queue_ref("fake inkjet", mod)["uuid"] == FAKE
+        for bad in ("Office", "Usb", "ghost", "", None):
+            with pytest.raises(DeviceNotAllowed):
+                safety.assert_fake_queue(bad, policy=p, module=mod)
+        with pytest.raises(DeviceNotAllowed):
+            safety.assert_fake_queue("fake inkjet", policy=pol(deny=["inkjet"]), module=mod)
+        assert calls == []
+    finally:
+        sys.modules.pop("_fake_winprint", None)
+
+
 # ---- the table's own shape --------------------------------------------------------------------------
 def test_coverage_helper():
     assert safety.is_covered("pdfcraft.wsdprint.print_document")

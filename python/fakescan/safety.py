@@ -73,6 +73,7 @@ __all__ = [
     "Verdict",
     "allowed",
     "assert_fake",
+    "assert_fake_queue",
     "current_policy",
     "filter_refs",
     "guard",
@@ -82,6 +83,7 @@ __all__ = [
     "install",
     "is_fake",
     "normalise_uuid",
+    "queue_ref",
     "self_check",
     "set_policy",
     "use_policy",
@@ -959,6 +961,28 @@ def _winprint_ref(mod: Any, printer: Any) -> dict[str, Any]:
     if not ident.get("uuid"):
         ident["uuid"] = None
     return ident
+
+
+def queue_ref(name: Any, module: Any = None) -> dict[str, Any]:
+    """The policy reference of the Windows queue called exactly ``name``: ``{"name", "uuid"}`` where ``uuid`` is the WSD
+    device UUID Windows recorded for the queue's port (read-only registry / spooler reads through
+    ``fakeprint.winprint``'s original functions), or ``None`` when it cannot be read (not Windows, not WSD, any
+    error). The queue's name proves nothing; the port string (``WSD-<random guid>``) is not the device uuid."""
+    try:
+        mod = module or importlib.import_module("fakeprint.winprint")
+    except Exception:  # noqa: BLE001
+        return {"name": name if isinstance(name, str) else "", "uuid": None}
+    return _winprint_ref(mod, name)
+
+
+def assert_fake_queue(name: Any, action: str = "open", policy: Policy | None = None, module: Any = None) -> None:
+    """Raise :class:`DeviceNotAllowed` unless the Windows queue ``name`` is bound to a fake device (its WSD port UUID is
+    in the fake namespace and no deny pattern matches). For harness code that talks to a queue through ctypes
+    (``OpenPrinter``, ``CreateDC``, ``DeviceCapabilities``) instead of ``fakeprint.winprint``."""
+    if not isinstance(name, str) or not name.strip():
+        raise DeviceNotAllowed(action, "no-device")
+    ref = queue_ref(name, module)
+    (policy or current_policy()).assert_allowed({"uuid": ref["uuid"], "name": ref["name"]} if ref["uuid"] else {"name": ref["name"]}, action)
 
 
 def _wrap_winprint(orig: Callable, getp: PolicyGetter, sink: Sink) -> Callable:
