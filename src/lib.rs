@@ -15,6 +15,9 @@ use pyo3::prelude::*;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+/// `(id, profile, uuid, friendly_name, initial_pages)` of one `Device(...)`.
+type DeviceSpec = (String, String, Option<String>, Option<String>, Option<u32>);
+
 #[pyclass(module = "fakescan")]
 struct Server {
     ready: Ready,
@@ -26,7 +29,7 @@ struct Server {
 impl Server {
     /// Start the server and return once it is listening.
     #[new]
-    #[pyo3(signature = (*, profiles, profile="brother-wsd", host="127.0.0.1", port=0, device_uuid=None, wsd=true, discovery=false, advertise=None, devices=None))]
+    #[pyo3(signature = (*, profiles, profile="brother-wsd", host="127.0.0.1", port=0, device_uuid=None, wsd=true, discovery=false, advertise=None, devices=None, initial_pages=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python<'_>,
@@ -38,7 +41,8 @@ impl Server {
         wsd: bool,
         discovery: bool,
         advertise: Option<&str>,
-        devices: Option<Vec<(String, String, Option<String>, Option<String>)>>,
+        devices: Option<Vec<DeviceSpec>>,
+        initial_pages: Option<u32>,
     ) -> PyResult<Self> {
         let ip: IpAddr = host.parse().map_err(|e| PyRuntimeError::new_err(format!("host {host}: {e}")))?;
         let mut cfg = ServerConfig::lab(profiles, profile);
@@ -51,15 +55,18 @@ impl Server {
         cfg.instance_lock = false;
         cfg.named_pipe = false;
         cfg.ctrl_c = false;
+        // Daemon-wide default for devices that set none (a Device's own value wins).
+        cfg.initial_pages = initial_pages;
         if let Some(list) = devices.filter(|l| !l.is_empty()) {
             let mut out = Vec::new();
-            for (id, prof, uuid, name) in list {
+            for (id, prof, uuid, name, pages) in list {
                 let uuid = match uuid {
                     Some(t) => Uuid::parse_str(&t).map_err(|e| PyRuntimeError::new_err(format!("device {id}: uuid: {e}")))?,
                     None => fakescan::lab::random_fake_uuid(),
                 };
                 let mut d = DeviceConfig::new(id, prof, uuid);
                 d.friendly_name = name;
+                d.initial_pages = pages;
                 out.push(d);
             }
             // The first device is the default one and may keep the lab UUID when none was given.

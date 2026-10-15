@@ -12,7 +12,8 @@ class Server:
         wsd: bool = True,
         discovery: bool = False,
         advertise: str | None = None,
-        devices: list[tuple[str, str, str | None, str | None]] | None = None,
+        devices: list[tuple[str, str, str | None, str | None, int | None]] | None = None,
+        initial_pages: int | None = None,
     ) -> None: ...
     @property
     def port(self) -> int: ...

@@ -23,6 +23,9 @@ class Device:
     profile: str = "brother-wsd"
     device_uuid: str | None = None
     friendly_name: str | None = None
+    #: Sheets loaded into the tray when the device starts and on every reset (``None`` = the
+    #: server's ``initial_pages``, else the profile's, which is 0: an empty feeder).
+    initial_pages: int | None = None
 
 
 class DeviceHandle:
@@ -63,6 +66,9 @@ class Server:
     ...     srv.devices["tray5"].client().set_pages(5)
 
     With no ``devices`` there is one ``default`` device using ``profile`` (and ``device_uuid``).
+    ``initial_pages`` preloads that many sheets in every device that sets no ``initial_pages`` of its
+    own (default: each profile's, which is 0, so the feeder starts empty and a test should
+    ``load_paper(n)`` explicitly). It is applied again on every ``reset()``.
     ``discovery`` stays off unless asked: an embedded server must not advertise a second
     scanner on the LAN. ``wsd=True`` still serves ``ScannerService`` at ``scan_endpoint``.
     Devices can be added and removed while running (``add_device`` / ``remove_device``, over
@@ -85,13 +91,15 @@ class Server:
         wsd: bool = True,
         discovery: bool = False,
         advertise: str | None = None,
+        initial_pages: int | None = None,
     ) -> None:
         if devices and device_uuid is not None:
             raise ValueError("device_uuid applies to the implicit default device; set it on a Device instead")
         specs = None
         if devices:
             specs = [
-                (d.id, d.profile, d.device_uuid or random_fake_uuid(), d.friendly_name) for d in devices
+                (d.id, d.profile, d.device_uuid or random_fake_uuid(), d.friendly_name, d.initial_pages)
+                for d in devices
             ]
         self._native = _NativeServer(
             profiles=str(profiles if profiles is not None else _paths.profiles_dir()),
@@ -103,6 +111,7 @@ class Server:
             discovery=discovery,
             advertise=advertise,
             devices=specs,
+            initial_pages=initial_pages,
         )
         self._manager: Manager | None = None
         self._default_id = DEFAULT_DEVICE_ID if not devices else devices[0].id
@@ -151,6 +160,7 @@ class Server:
                 device.profile,
                 device_uuid=device.device_uuid,
                 friendly_name=device.friendly_name,
+                initial_pages=device.initial_pages,
             )
         handle = DeviceHandle(
             self, row["id"], str(row["uuid"]), row["profile"], row.get("friendly_name") or device.id

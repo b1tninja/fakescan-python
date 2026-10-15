@@ -46,7 +46,7 @@ with Server(profile="brother-wsd") as srv:      # 127.0.0.1, ephemeral port
     assert len(pages) == 3
 ```
 
-`Server(devices=None, *, profile, profiles, host, port, device_uuid, wsd, discovery, advertise)`: `port=0` picks one; `wsd` serves `ScannerService`; `discovery` (WS-Discovery announce) is **off** by default so a test server never advertises a scanner on the LAN. With no `devices` there is one `default` device (`profile`, `device_uuid`).
+`Server(devices=None, *, profile, profiles, host, port, device_uuid, wsd, discovery, advertise, initial_pages)`: `port=0` picks one; `wsd` serves `ScannerService`; `discovery` (WS-Discovery announce) is **off** by default so a test server never advertises a scanner on the LAN. With no `devices` there is one `default` device (`profile`, `device_uuid`).
 
 ## Several scanners in one server
 
@@ -64,7 +64,8 @@ with Server(devices=[Device("tray5", profile="feeder-tray5"),
     h.client().set_pages(6)                  # ApiError (HTTP 409): the tray holds 5 sheets
 ```
 
-- `Device(id, profile, device_uuid=None, friendly_name=None)`; the first device is the default: `srv.client()` and the legacy `/v1/*`, `/ScannerService` paths address it. Other devices live under `/d/{id}/...`.
+- `Device(id, profile, device_uuid=None, friendly_name=None, initial_pages=None)`; the first device is the default: `srv.client()` and the legacy `/v1/*`, `/ScannerService` paths address it. Other devices live under `/d/{id}/...`.
+- Paper. Every fake scanner starts with an EMPTY feeder (`status().pages_remaining == 0`), so a feeder scan fails until paper is loaded. Be explicit in tests: `c.load_paper(6)` (= `set_pages(6)` + `set_feeder(True)`) and `c.empty_tray()` (= `set_pages(0)`). Or start loaded: `Device("t", "feeder-tray5", initial_pages=5)` / `Server(initial_pages=6)` (a device's own value wins; clamped to the tray capacity). The initial stack is loaded when the device is created and again on every `c.reset()`, `set_pages` still overrides it at run time, and `c.status().initial_pages` reports it. It is runtime state: it never changes the capability fingerprint or marks an installed device stale. `Client.add_device(..., initial_pages=)` and `Manager.add(..., initial_pages=)` take it too.
 - `Client(base_url, device="tray5")` scopes every control call to `/d/tray5/v1/*`, and its `base_url` is `{base}/d/tray5`, so the `fakescan.soap` helpers work unchanged. `Client.devices()`, `add_device(id, profile, ...)`, `remove_device(id)` manage the fleet of any server.
 - Faults: `Client.set_fault(jam=, cover_open=, interlock_open=, ..., cover_open_after_n=N, jam_after_n=N, ...)` for the classic toggles and counters. For interruptions at a chosen moment use the fault plan: `Client.inject_fault(kind, when, sticky=, one_shot=)` with `when` = `"now"` (also hits a running job), `after_pages(N)` (between pages), `mid_page(P, fraction=0.5)` or `mid_page(P, bytes=B)` (page P's stream is cut, that page is not delivered), or `after_ms(T)`; `Client.fault_plan()` lists entries (fired or pending), `Client.clear_fault_plan()` drops them. Kinds: jam, cover_open, interlock_open, multi_feed, empty, offline, lamp_error, busy, abort. Semantics: fakescan `docs/defects.md`.
 - HTTP failures raise `fakescan.ApiError` (an `httpx.HTTPStatusError` carrying `status_code` and the server's message): 409 for a tray over capacity or a duplicate device id/UUID, 400 for an unknown profile, 404 for an unknown or removed device.

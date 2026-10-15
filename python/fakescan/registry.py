@@ -177,6 +177,7 @@ class DeviceRow:
     device_uuid: str = ""
     profile: str = "brother-wsd"
     friendly_name: str | None = None
+    initial_pages: int | None = None  # the device's own tray preload; None = inherit
     config: Config | None = None
     install: Install = field(default_factory=Install)
     exe: str | None = None
@@ -199,6 +200,9 @@ class DeviceRow:
             device_uuid=str(raw.get("device_uuid") or ""),
             profile=str(raw.get("profile") or "brother-wsd"),
             friendly_name=_s(raw.get("friendly_name")),
+            initial_pages=(
+                int(raw["initial_pages"]) if isinstance(raw.get("initial_pages"), int) else None
+            ),
             config=Config.parse(raw.get("config")),
             install=install,
             exe=_s(raw.get("exe")),
@@ -207,8 +211,8 @@ class DeviceRow:
             added_pnp=pnp,
             extra=_split(
                 raw,
-                ("name", "listen", "advertise", "device_uuid", "profile", "friendly_name", "config",
-                 "install", "exe", "autostart", "harness", "added"),
+                ("name", "listen", "advertise", "device_uuid", "profile", "friendly_name",
+                 "initial_pages", "config", "install", "exe", "autostart", "harness", "added"),
             ),
         )
 
@@ -260,6 +264,7 @@ class ManagedDevice:
     uuid: str
     profile: str
     friendly_name: str = ""
+    initial_pages: int = 0  # sheets a reset loads (0 = starts empty)
     scan_endpoint: str | None = None
     device_endpoint: str | None = None
     install: Install | None = None
@@ -276,6 +281,7 @@ class ManagedDevice:
             uuid=str(raw.get("uuid") or ""),
             profile=str(raw.get("profile") or ""),
             friendly_name=str(raw.get("friendly_name") or ""),
+            initial_pages=int(raw.get("initial_pages") or 0),
             scan_endpoint=_s(raw.get("scan_endpoint")),
             device_endpoint=_s(raw.get("device_endpoint")),
             install=Install.parse(inst) if isinstance(inst, dict) else None,
@@ -284,7 +290,7 @@ class ManagedDevice:
             needs_readd_reason=_s(raw.get("needs_readd_reason")),
             extra=_split(
                 raw,
-                ("id", "uuid", "profile", "friendly_name", "scan_endpoint", "device_endpoint", "install",
+                ("id", "uuid", "profile", "friendly_name", "initial_pages", "scan_endpoint", "device_endpoint", "install",
                  "config", "needs_readd", "needs_readd_reason"),
             ),
         )

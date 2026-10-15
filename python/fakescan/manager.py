@@ -96,10 +96,13 @@ class Manager:
         profile: str,
         device_uuid: str | None = None,
         friendly_name: str | None = None,
+        initial_pages: int | None = None,
     ) -> ManagedDevice:
         """POST /v1/devices. Without ``device_uuid`` the daemon reuses the row's stored UUID, else
         derives one. Adding an installed device again keeps its identity."""
-        self._client.add_device(id, profile, device_uuid=device_uuid, friendly_name=friendly_name)
+        self._client.add_device(
+            id, profile, device_uuid=device_uuid, friendly_name=friendly_name, initial_pages=initial_pages
+        )
         return self.device(id)
 
     def remove(self, id: str, forget: bool = False) -> None:

@@ -80,6 +80,11 @@ class Status:
         return int(self.raw.get("pages_remaining", 0))
 
     @property
+    def initial_pages(self) -> int:
+        """Sheets a fresh device and ``reset()`` load into the tray (0 = starts empty)."""
+        return int(self.raw.get("initial_pages", 0))
+
+    @property
     def duplex(self) -> bool:
         """Hardware ADF duplex advertised by the active profile."""
         return bool(self.raw.get("duplex"))
@@ -334,9 +339,15 @@ class Client:
         *,
         device_uuid: str | None = None,
         friendly_name: str | None = None,
+        initial_pages: int | None = None,
     ) -> dict[str, Any]:
-        """Add a device at runtime (POST /v1/devices). 409 on duplicate id/uuid -> ApiError."""
+        """Add a device at runtime (POST /v1/devices). 409 on duplicate id/uuid -> ApiError.
+
+        ``initial_pages`` preloads the tray at start and on every reset (default: the daemon's /
+        the profile's, 0 = empty)."""
         body: dict[str, Any] = {"id": id, "profile": profile}
+        if initial_pages is not None:
+            body["initial_pages"] = int(initial_pages)
         if device_uuid is not None:
             body["device_uuid"] = str(device_uuid)
         if friendly_name is not None:
@@ -401,6 +412,18 @@ class Client:
         if order is not None:
             body["order"] = order
         return Status(raw=self._json("POST", "/v1/pages", body))
+
+    def load_paper(self, n: int = 6) -> Status:
+        """Put ``n`` sheets in the feeder and mark it ready (``set_pages(n)`` + ``set_feeder(True)``).
+
+        Use this in tests that scan from the feeder instead of relying on the device starting
+        loaded (a fake scanner starts empty unless ``initial_pages`` is set)."""
+        self.set_pages(n)
+        return self.set_feeder(True)
+
+    def empty_tray(self) -> Status:
+        """Empty the feeder (``set_pages(0)``): the explicit way to test the empty-tray path."""
+        return self.set_pages(0)
 
     def set_pattern(self, pattern_id: str) -> Status:
         return Status(raw=self._json("POST", "/v1/pattern", {"id": pattern_id}))
