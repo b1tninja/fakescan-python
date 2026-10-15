@@ -132,16 +132,16 @@ def test_scanning_listing_filters_and_opens_only_fakes(bindings):
     import pdfcraft.scan as sc
     import pdfcraft.scanning as sg
 
-    out = sg.list_scanners()
-    assert [r.name for r in out.items] == ["A"]
+    out = sg.list_scanners()  # a listing shows every device
+    assert [r.name for r in out.items] == ["A", "B"]
     NATIVE_CALLS.clear()
     out = sg.list_scanners(details=True)
-    assert [r.name for r in out] == ["x"]  # the stub's detail row replaced the fake's row; B was never opened
+    assert [r.name for r in out] == ["x", "B"]  # the stub's detail row replaced the fake's row; B is listed, never opened
     assert NATIVE_CALLS.count("scanner_details") == 1
     flat = sc.list_scanners()
-    assert [r["name"] for r in flat["scanners"]] == ["A"]
+    assert [r["name"] for r in flat["scanners"]] == ["A", "B"]
     rows, errors = sc.scanners_with_errors()
-    assert [r["name"] for r in rows] == ["A"] and errors == []
+    assert [r["name"] for r in rows] == ["A", "B"] and errors == []
     marked = sg.list_scanners(include_excluded=True)
     assert [m.excluded for m in marked] == [False, True]
 

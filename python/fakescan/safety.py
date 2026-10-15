@@ -482,9 +482,11 @@ class Policy:
     assert_fake = assert_allowed
 
     # -- listings --------------------------------------------------------------------------------------
-    def filter_refs(self, refs: Any, include_excluded: bool = False) -> Any:
-        """Only the allowed refs of ``refs`` (a list, a dict with ``scanners`` / ``items``, or a bindings
-        ``Listing``). ``include_excluded=True`` returns a :class:`MarkedListing` with every ref marked."""
+    def filter_refs(self, refs: Any, include_excluded: bool = False, allowed_only: bool = False) -> Any:
+        """A listing shows EVERY device: by default ``refs`` (a list, a dict with ``scanners`` / ``items``, or a
+        bindings ``Listing``) comes back unchanged. ``include_excluded=True`` returns a :class:`MarkedListing`
+        with every ref marked allowed/excluded; ``allowed_only=True`` returns just the allowed subset (for
+        callers that are about to OPEN the rows: opening, scanning and printing are what the policy refuses)."""
         items, errors, rebuild = _unpack_listing(refs)
         marks = []
         for r in items:
@@ -492,7 +494,9 @@ class Policy:
             marks.append(Marked(r, not v.allowed, v.reason))
         if include_excluded:
             return MarkedListing(tuple(marks), tuple(errors))
-        return rebuild([m.ref for m in marks if not m.excluded])
+        if allowed_only:
+            return rebuild([m.ref for m in marks if not m.excluded])
+        return rebuild([m.ref for m in marks])
 
     def self_check(self, targets: Iterable[Any]) -> None:
         """Fail (``DeviceNotAllowed``) when any target is not allowed: run it on the devices a session is about
@@ -568,8 +572,8 @@ def assert_fake(ref: Any, action: str = "use", policy: Policy | None = None) -> 
     (policy or current_policy()).assert_allowed(ref, action)
 
 
-def filter_refs(refs: Any, include_excluded: bool = False, policy: Policy | None = None) -> Any:
-    return (policy or current_policy()).filter_refs(refs, include_excluded)
+def filter_refs(refs: Any, include_excluded: bool = False, policy: Policy | None = None, allowed_only: bool = False) -> Any:
+    return (policy or current_policy()).filter_refs(refs, include_excluded, allowed_only)
 
 
 def self_check(targets: Iterable[Any], policy: Policy | None = None) -> None:
@@ -852,14 +856,20 @@ def _wrap_list_scanners(orig: Callable, getp: PolicyGetter, *, tuple_form: bool 
             raise ValueError("an empty device filter is refused")
         opener = _opener_for(orig)
         kept: list[Any] = []
+        shown: list[Marked] = []
         for m in marks:
-            if m.excluded or not _row_text_match(m.ref, device):
+            if not _row_text_match(m.ref, device):
+                continue
+            if m.excluded:  # still LISTED (a listing shows every device); only opening it is refused
+                kept.append(m.ref)
+                shown.append(m)
                 continue
             pol.remember(m.ref)  # proven through its port / uuid: its bare WIA id is usable from now on
-            kept.append(opener(m.ref) if (details or device) else m.ref)
+            row = opener(m.ref) if (details or device) else m.ref
+            kept.append(row)
+            shown.append(Marked(row, False, "ok"))
         if include_excluded:
-            full = [Marked(x, False, "ok") for x in kept] + [m for m in marks if m.excluded]
-            return MarkedListing(tuple(full), tuple(errors))
+            return MarkedListing(tuple(shown), tuple(errors))
         out = rebuild(kept)
         return (list(out["scanners"]), list(out.get("errors", ()))) if tuple_form else out
 
@@ -933,9 +943,9 @@ def _wrap_list_printers(orig: Callable, getp: PolicyGetter) -> Callable:
     def wrapper(self: Any, *a: Any, include_excluded: bool = False, **k: Any):
         pol = getp()
         listing = orig(self, *a, **k)
-        out = pol.filter_refs(listing, include_excluded)
-        if not include_excluded:
-            for r in _unpack_listing(out)[0]:
+        out = pol.filter_refs(listing, include_excluded)  # every queue is listed; opening one is what is refused
+        for r in _unpack_listing(listing)[0]:
+            if pol.allowed(r):
                 pol.remember(r)
         return out
 

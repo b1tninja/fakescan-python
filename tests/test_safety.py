@@ -210,10 +210,13 @@ def test_spooler_queue_needs_the_registry_proof():
 def test_filter_refs_dict_list_and_listing():
     p = pol()
     payload = {"scanners": [dict(r) for r in lib.ROWS], "errors": [{"backend": "b", "error": "e"}]}
-    out = p.filter_refs(payload)
-    assert [r["name"] for r in out["scanners"]] == ["Fake Scanner"] and out["errors"] == payload["errors"]
+    out = p.filter_refs(payload)  # a listing shows every device
+    assert [r["name"] for r in out["scanners"]] == ["Fake Scanner", "Office MFC", "Office MFC"] and out["errors"] == payload["errors"]
+    only = p.filter_refs(payload, allowed_only=True)
+    assert [r["name"] for r in only["scanners"]] == ["Fake Scanner"]
     listing = lib.Listing(tuple(lib.PRINTERS), ())
-    assert [r.name for r in p.filter_refs(listing).items] == ["fakeprint inkjet"]
+    assert [r.name for r in p.filter_refs(listing).items] == ["fakeprint inkjet", "Office"]
+    assert [r.name for r in p.filter_refs(listing, allowed_only=True).items] == ["fakeprint inkjet"]
     assert p.filter_refs([]) == []
     marked = p.filter_refs(listing, include_excluded=True)
     assert [m.excluded for m in marked] == [False, True] and len(marked) == 2
@@ -371,17 +374,17 @@ def test_scan_default_device_and_registry_exemption(installed):
 
 def test_listing_never_opens_excluded_devices(installed):
     m = installed
-    out = m.list_scanners()
-    assert [r["name"] for r in out["scanners"]] == ["Fake Scanner"]
+    out = m.list_scanners()  # a listing shows every device
+    assert [r["name"] for r in out["scanners"]] == ["Fake Scanner", "Office MFC", "Office MFC"]
     assert lib.CALLS == [("list_scanners", None, False)]  # names only
     lib.reset()
     out = m.list_scanners(details=True)
-    assert [r["details"] for r in out["scanners"]] == ["loaded"]
+    assert [r.get("details") for r in out["scanners"]] == ["loaded", None, None]  # excluded rows listed, never opened
     opened = [c for c in lib.CALLS if c[0] == "scanner_details"]
     assert len(opened) == 1 and "11111111" in opened[0][1]  # only the fake was opened
     lib.reset()
-    out = m.list_scanners(device="mfc", details=False)  # names excluded devices only: finds nothing, opens nothing
-    assert out["scanners"] == [] and not [c for c in lib.CALLS if c[0] == "scanner_details"]
+    out = m.list_scanners(device="mfc", details=False)  # names the excluded rows: listed, nothing opened
+    assert [r["name"] for r in out["scanners"]] == ["Office MFC", "Office MFC"] and not [c for c in lib.CALLS if c[0] == "scanner_details"]
     with pytest.raises(ValueError):
         m.list_scanners(device="  ")
     marked = m.list_scanners(include_excluded=True)
@@ -439,7 +442,7 @@ def test_registry_methods(installed):
     with pytest.raises(DeviceNotAllowed):
         r.job_status("wsd:http://203.0.113.9/p#7")
     items = r.list_printers().items
-    assert [p.name for p in items] == ["fakeprint inkjet"]
+    assert [p.name for p in items] == ["fakeprint inkjet", "Office"]  # listed, not hidden
     assert len(r.list_printers(include_excluded=True)) == 2
 
 
@@ -456,7 +459,7 @@ def test_guarded_module_and_instance_proxies(table):
     reg = g.Registry()  # classes with guarded methods come back as factories of guarded objects
     with pytest.raises(DeviceNotAllowed):
         reg.submit(b"x", printer="wsd:http://203.0.113.9/p")
-    assert [p.name for p in reg.list_printers().items] == ["fakeprint inkjet"]
+    assert [p.name for p in reg.list_printers().items] == ["fakeprint inkjet", "Office"]  # listed, not hidden
     reg2 = safety.guarded(m.Registry())
     with pytest.raises(DeviceNotAllowed):
         reg2.register_wsd(["http://203.0.113.9/p"])
