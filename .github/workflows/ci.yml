@@ -15,6 +15,10 @@ jobs:
         with:
           repository: b1tninja/fakescan
           path: fakescan
+      - name: fetch WSD specs (licence accepted, test inputs only; they stay in the fakescan checkout)
+        shell: pwsh
+        working-directory: fakescan
+        run: ./scripts/Get-WsdSpecs.ps1 -AcceptLicense
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
@@ -42,6 +46,10 @@ jobs:
         with:
           repository: b1tninja/fakescan
           path: fakescan
+      - name: fetch WSD specs (licence accepted, test inputs only; they stay in the fakescan checkout)
+        shell: pwsh
+        working-directory: fakescan
+        run: ./scripts/Get-WsdSpecs.ps1 -AcceptLicense
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
