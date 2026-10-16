@@ -113,6 +113,10 @@ jobs:
           "$py/python" -c "import fakescan, fakescan._native; print('imported', fakescan.__file__)"
           "$py/fakescan-ctl" --help > /dev/null
 
+      - name: no Microsoft specification files in the wheel
+        shell: bash
+        run: bash fakescan-python/.github/scripts/check-artifacts.sh fakescan-python/dist/*.whl
+
       - uses: actions/upload-artifact@v4
         with:
           name: wheel-${{ matrix.name }}
@@ -141,6 +145,14 @@ jobs:
         run: |
           sha=$(gh api "repos/b1tninja/fakescan/commits/${{ env.FAKESCAN_REF }}" --jq .sha)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+          path: _repo
+
+      - name: no Microsoft specification files in any artifact
+        run: bash _repo/.github/scripts/check-artifacts.sh dist/*
 
       - name: checksums
         working-directory: dist
