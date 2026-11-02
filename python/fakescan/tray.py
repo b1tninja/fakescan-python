@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -29,7 +30,8 @@ from .client import DEFAULT_BASE_URL
 from .manager import is_loopback_url
 
 EXE_ENV = "FAKESCAN_EXE"
-KNOWN_DAEMON_DIR = Path(r"D:\temp\fakescan-daemon")
+# Where an installed daemon lives: the system temporary folder.
+KNOWN_DAEMON_DIR = Path(tempfile.gettempdir()) / "fakescan-daemon"
 
 
 def _exe_name() -> str:
@@ -46,7 +48,7 @@ def health(base_url: str, timeout: float = 1.0) -> bool:
 
 
 def find_daemon_exe(exe: str | os.PathLike[str] | None = None) -> Path | None:
-    """Locate fakescan: explicit ``exe``, ``$FAKESCAN_EXE``, PATH, ``D:\temp\fakescan-daemon``,
+    """Locate fakescan: explicit ``exe``, ``$FAKESCAN_EXE``, PATH, ``<temp>/fakescan-daemon``,
     then ``$CARGO_TARGET_DIR`` and ``$FAKESCAN_REPO/target`` (``debug`` then ``release``).
     An explicit ``exe`` that does not exist is an error (``FileNotFoundError``), not a fallthrough."""
     name = _exe_name()

@@ -26,7 +26,7 @@ parent/
 ## Install (development)
 
 ```powershell
-cd D:\code\fakescan-python
+cd fakescan-python   # beside a fakescan checkout
 python -m venv .venv
 .venv\Scripts\activate
 pip install -U pip maturin pytest pillow httpx
@@ -152,7 +152,7 @@ tray.ensure_daemon()            # 'attached' | 'started'
 * `fakescan.tray.ensure_daemon(base_url, exe=None, args=(), opener=subprocess.Popen)`: the tray lives
   in the daemon, so this ensures `fakescan --manage` is running: `GET /health` first (attach-first,
   idempotent, never kills anything), else it spawns the exe (explicit arg, `FAKESCAN_EXE`, PATH,
-  `D:\temp\fakescan-daemon`, `$CARGO_TARGET_DIR` / `$FAKESCAN_REPO/target/{debug,release}`) detached with
+  `<temp>\fakescan-daemon`, `$CARGO_TARGET_DIR` / `$FAKESCAN_REPO/target/{debug,release}`) detached with
   no console window and waits for `/health`. Embedded `Server`s never show a tray.
 * `fakescan-ctl` subcommands (each takes `--base-url`): `ui`, `devices` / `status [--raw]` (table),
   `add ID --profile P [--uuid U] [--name FRIENDLY]`, `remove ID [--forget]`, `profiles`,
